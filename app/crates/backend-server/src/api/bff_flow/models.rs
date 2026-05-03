@@ -36,7 +36,6 @@ pub struct SubmitStepRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UserResponse {
     pub user_id: String,
-    pub realm: String,
     pub username: String,
     pub full_name: Option<String>,
     pub email: Option<String>,
@@ -173,7 +172,6 @@ impl UserResponse {
     pub fn from_row_with_metadata(row: backend_model::db::UserRow, metadata: Value) -> Self {
         Self {
             user_id: row.user_id,
-            realm: row.realm,
             username: row.username,
             full_name: row.full_name,
             email: row.email,

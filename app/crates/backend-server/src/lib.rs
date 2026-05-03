@@ -1,7 +1,7 @@
 //! Main backend server library for the tokenization backend.
 #![allow(clippy::result_large_err)]
 //!
-//! This crate provides the HTTP server, API surfaces (KC, BFF, Staff),
+//! This crate provides the HTTP server, API surfaces (BFF, Staff),
 //! state machine engine, background workers, and all application logic.
 //! It handles user storage, KYC flows, and integrations.
 
@@ -207,13 +207,6 @@ fn build_router(
     // Global signature layer for all API surfaces
     let sig_layer = signature_layer(config.kc.enabled, api.signature_state.clone());
 
-    // Mount KC router
-    let kc_base = config.kc.base_path.trim();
-    if !kc_base.is_empty() && kc_base != "/" {
-        let kc_router = gen_oas_server_kc::server::new(api.clone());
-        router = router.nest(kc_base, kc_router);
-    }
-
     // Mount BFF router
     let bff_base = config.bff.base_path.trim();
     if !bff_base.is_empty() && bff_base != "/" {
@@ -250,7 +243,7 @@ fn build_router(
                         .extensions()
                         .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
                         .map(|ci| ci.0.to_string())
-                        .unwrap_or_else(|| "unknown".to_string());
+                        .unwrap_or_else(|| "unknown".to_owned());
                     let correlation_id = req
                         .headers()
                         .get("X-Correlation-ID")
@@ -276,7 +269,7 @@ fn build_router(
                             status = %res.status(),
                             latency = ?latency,
                             "sending response"
-                        )
+                        );
                     },
                 ),
         )

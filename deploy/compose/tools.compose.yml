@@ -53,12 +53,8 @@ services:
       download-core-tools:
         condition: service_completed_successfully
     configs:
-      - source: oas_server_kc
-        target: /tmp/oas_server_kc.json
-        mode: 444
       - source: oas_client_cuss
         target: /tmp/oas_client_cuss.json
-        mode: 444
       - source: oas_kc_openapi
         target: /tmp/oas_kc_openapi.json
         mode: 444
@@ -74,7 +70,7 @@ services:
 
         JAR_FILE=/data/bin/openapi-generator-cli.jar
 
-        for item in oas_server_kc oas_client_cuss; do
+        for item in oas_client_cuss; do
             echo "Generating $$item..."
             
             # Generate to a local container directory first to avoid bind mount issues
@@ -121,14 +117,6 @@ volumes:
   downloaded_data:
 
 configs:
-  oas_server_kc:
-    content: |
-      {
-        "inputSpec": "/data/keycloak-interface.openapi.yaml",
-        "generatorName": "rust-axum",
-        "packageName": "gen_oas_server_kc",
-        "packageVersion": "9.9.9"
-      }
   oas_client_cuss:
     content: |
       {
@@ -140,7 +128,7 @@ configs:
   oas_kc_openapi:
     content: |
       {
-        "inputSpec": "/data/keycloak-interface.openapi.yaml",
+        "inputSpec": "/openapi/keycloak-interface.openapi.yaml",
         "generatorName": "openapi",
         "packageName": "kc_openapi",
         "packageVersion": "9.9.9"

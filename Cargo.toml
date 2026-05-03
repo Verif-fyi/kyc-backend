@@ -6,7 +6,6 @@ members = [
     "app/crates/backend-env",
     "app/crates/backend-e2e",
     "app/crates/backend-flow-sdk",
-    "app/crates/backend-id",
     "app/crates/backend-migrate",
     "app/crates/backend-model",
     "app/crates/backend-repository",
@@ -14,7 +13,6 @@ members = [
     "app/bins/sms-gateway",
 
     "app/gen/oas_client_cuss",
-    "app/gen/oas_server_kc",
 ]
 resolver = "3"
 
@@ -23,14 +21,12 @@ backend-auth = { path = "app/crates/backend-auth" }
 backend-core = { path = "app/crates/backend-core" }
 backend-env = { path = "app/crates/backend-env" }
 backend-flow-sdk = { path = "app/crates/backend-flow-sdk" }
-backend-id = { path = "app/crates/backend-id" }
 backend-migrate = { path = "app/crates/backend-migrate" }
 backend-model = { path = "app/crates/backend-model" }
 backend-repository = { path = "app/crates/backend-repository" }
 backend-server = { path = "app/crates/backend-server" }
 
 gen_oas_client_cuss = { path = "app/gen/oas_client_cuss" }
-gen_oas_server_kc = { path = "app/gen/oas_server_kc" }
 
 o2o = "0"
 

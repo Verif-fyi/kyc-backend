@@ -136,7 +136,7 @@ mock! {
     impl UserRepo for UserRepo {
         async fn create_user(
             &self,
-            req: &backend_model::kc::UserUpsert,
+            req: &backend_model::user::UserUpsert,
         ) -> RepoResult<backend_model::db::UserRow>;
         async fn get_user(
             &self,
@@ -145,25 +145,25 @@ mock! {
         async fn update_user(
             &self,
             user_id: &str,
-            req: &backend_model::kc::UserUpsert,
+            req: &backend_model::user::UserUpsert,
         ) -> RepoResult<Option<backend_model::db::UserRow>>;
         async fn delete_user(&self, user_id: &str) -> RepoResult<u64>;
         async fn search_users(
             &self,
-            req: &backend_model::kc::UserSearch,
+            req: &backend_model::user::UserSearch,
         ) -> RepoResult<Vec<backend_model::db::UserRow>>;
         async fn resolve_user_by_phone(
             &self,
-            realm: &str,
             phone: &str,
         ) -> RepoResult<Option<backend_model::db::UserRow>>;
+
         async fn find_users_by_phone(
             &self,
             phone: &str,
         ) -> RepoResult<Vec<backend_model::db::UserRow>>;
+
         async fn resolve_or_create_user_by_phone(
             &self,
-            realm: &str,
             phone: &str,
         ) -> RepoResult<(backend_model::db::UserRow, bool)>;
         async fn upsert_user_data(

@@ -273,33 +273,33 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
             r#"
             INSERT INTO app_user (
                 user_id,
-                realm,
                 username,
                 full_name,
                 phone_number,
                 email_verified,
                 disabled,
+                attributes,
                 created_at,
                 updated_at
             ) VALUES (
-                $1,
-                'e2e-testing',
-                $2,
-                'E2E Subject',
-                '+237690123456',
+                'usr_e2e_staff_001',
+                'e2e-staff',
+                'E2E Staff',
+                '+237690000001',
                 true,
                 false,
+                '{}'::jsonb,
                 NOW(),
                 NOW()
             )
             ON CONFLICT (user_id) DO UPDATE
             SET
-                realm = EXCLUDED.realm,
                 username = EXCLUDED.username,
                 full_name = EXCLUDED.full_name,
                 phone_number = EXCLUDED.phone_number,
                 email_verified = EXCLUDED.email_verified,
                 disabled = false,
+                attributes = '{}'::jsonb,
                 updated_at = NOW()
             "#,
             &[&normalized_user_id, &username],
@@ -312,33 +312,33 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
             r#"
             INSERT INTO app_user (
                 user_id,
-                realm,
                 username,
                 full_name,
                 phone_number,
                 email_verified,
                 disabled,
+                attributes,
                 created_at,
                 updated_at
             ) VALUES (
-                'usr_e2e_staff_001',
-                'staff',
-                'e2e-staff',
-                'E2E Staff',
-                '+237690000001',
+                $1,
+                $2,
+                'E2E Subject',
+                '+237690123456',
                 true,
                 false,
+                '{}'::jsonb,
                 NOW(),
                 NOW()
             )
             ON CONFLICT (user_id) DO UPDATE
             SET
-                realm = EXCLUDED.realm,
                 username = EXCLUDED.username,
                 full_name = EXCLUDED.full_name,
                 phone_number = EXCLUDED.phone_number,
                 email_verified = EXCLUDED.email_verified,
                 disabled = false,
+                attributes = '{}'::jsonb,
                 updated_at = NOW()
             "#,
             &[],

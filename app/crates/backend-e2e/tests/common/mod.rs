@@ -1,22 +1,25 @@
-#![allow(dead_code)]
-
 use anyhow::{Context, Result, anyhow};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use base64::Engine;
 use hmac::{Hmac, Mac};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde_json::{Value, json};
 use sha2::Sha256;
 use std::time::{Duration, Instant};
-use tokio::time::sleep;
 use tokio_postgres::NoTls;
+
+// Global BFF fixture - simplified for HMAC-only auth
+static BFF_FIXTURE: tokio::sync::Mutex<Option<BffTestFixture>> = tokio::sync::Mutex::const_new(None);
+
+#[derive(Clone)]
+pub struct BffTestFixture {
+    pub user_id: String,
+    pub signing_key: Hmac<Sha256>,
+}
 
 impl std::fmt::Debug for BffTestFixture {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BffTestFixture")
-            .field("device_id", &self.device_id)
             .field("user_id", &self.user_id)
-            .field("jkt", &self.jkt)
-            .field("public_jwk", &self.public_jwk)
             .field("signing_key", &"<redacted>")
             .finish()
     }
@@ -24,54 +27,44 @@ impl std::fmt::Debug for BffTestFixture {
 
 impl BffTestFixture {
     pub fn generate(user_id: &str) -> Self {
-        let signing_key = SigningKey::random(&mut OsRng);
-        let verifying_key = signing_key.verifying_key();
-        let point = verifying_key.to_encoded_point(false);
-
-        let x = URL_SAFE_NO_PAD.encode(point.x().unwrap());
-        let y = URL_SAFE_NO_PAD.encode(point.y().unwrap());
-
-        let public_jwk = format!(
-            r#"{{"kty":"EC","crv":"P-256","alg":"ES256","x":"{}","y":"{}"}}"#,
-            x, y
-        );
+        let signing_key = Hmac::new_from_slice(b"some-very-long-secret")
+            .expect("HMAC key should be valid");
 
         Self {
-            device_id: E2E_BFF_DEVICE_ID.to_owned(),
             user_id: user_id.to_owned(),
-            jkt: E2E_BFF_DEVICE_JKT.to_owned(),
-            public_jwk,
             signing_key,
         }
     }
 
     pub fn get() -> Option<Self> {
-        BFF_FIXTURE.lock().ok().and_then(|guard| guard.clone())
+        BFF_FIXTURE.try_lock().ok().and_then(|guard| guard.clone())
     }
 
     pub fn sign_bff_request(&self, canonical_payload: &str) -> String {
-        let signature: Signature = self.signing_key.sign(canonical_payload.as_bytes());
-        URL_SAFE_NO_PAD.encode(signature.to_bytes())
+        let mut mac = self.signing_key.clone();
+        mac.update(canonical_payload.as_bytes());
+        let signature = mac.finalize().into_bytes();
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signature)
     }
 
     pub fn build_canonical_payload(
         &self,
         timestamp: i64,
-        nonce: &str,
         _method: &str,
         _path: &str,
         _body: &str,
         _user_id_hint: Option<&str>,
     ) -> String {
-        let escaped_public_key = self.public_jwk.replace('\\', "\\\\").replace('"', "\\\"");
+        // Simplified canonical payload for HMAC-only auth
         format!(
-            r#"{{"deviceId":"{}","publicKey":"{}","ts":"{}","nonce":"{}"}}"#,
-            self.device_id, escaped_public_key, timestamp, nonce
+            "{}\n{}",
+            timestamp,
+            self.user_id
         )
     }
 
     pub fn store_global(self) -> &'static Self {
-        if let Ok(mut guard) = BFF_FIXTURE.lock() {
+        if let Ok(mut guard) = BFF_FIXTURE.try_lock() {
             *guard = Some(self.clone());
         }
         Box::leak(Box::new(self))
@@ -159,7 +152,7 @@ pub async fn wait_for_status(
                 last_error = error.to_string();
             }
         }
-        sleep(Duration::from_secs(1)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
     Err(anyhow!(
@@ -174,7 +167,95 @@ pub async fn send_json(
     bearer: Option<&str>,
     body: Option<Value>,
 ) -> Result<JsonResponse> {
-    send_json_with_bff(client, method, url, bearer, body).await
+    let request_path = request_path(url)?;
+    let mut request = client
+        .request(method.clone(), url)
+        .header(CONTENT_TYPE, "application/json");
+
+    if let Some(token) = bearer {
+        request = request.header(AUTHORIZATION, format!("Bearer {token}"));
+    }
+
+    // Add user ID header for BFF requests
+    if request_path.starts_with("/bff") {
+        if let Ok(env) = Env::from_env() {
+            if let Ok((_, subject)) = get_client_token_and_subject(client, &env).await {
+                request = request.header("x-bff-authenticated-user-id", subject);
+            }
+        }
+    }
+
+    let should_sign = should_sign_request(&request_path);
+    if should_sign {
+        if let Ok(env) = Env::from_env() {
+            let timestamp = chrono::Utc::now().timestamp();
+            let timestamp_str = timestamp.to_string();
+            let payload = body
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .with_context(|| format!("failed to serialize request body for {url}"))?
+                .unwrap_or_default();
+
+            // HMAC signing matching server's canonical payload format
+            // Server expects: timestamp\nMETHOD\npath\nbody
+            let canonical_payload = format!(
+                "{}\n{}\n{}\n{}",
+                timestamp_str,
+                method.as_str().to_uppercase(),
+                request_path,
+                payload
+            );
+            let mut mac = Hmac::<Sha256>::new_from_slice(env.signature_secret.as_bytes())
+                .map_err(|e| anyhow!("HMAC error: {}", e))?;
+            mac.update(canonical_payload.as_bytes());
+            let signature = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+
+            request = request
+                .header("x-auth-timestamp", timestamp_str)
+                .header("x-auth-signature", signature);
+        }
+    }
+
+    if let Some(payload) = body.as_ref() {
+        request = request.body(serde_json::to_string(payload)?);
+    }
+
+    // Add user ID header for BFF requests
+    if request_path.starts_with("/bff") {
+        if let Some(token) = bearer {
+            // Extract user ID from the existing JWT token using the existing helper
+            if let Ok(subject) = jwt_subject(token) {
+                request = request.header("x-bff-authenticated-user-id", subject);
+            } else {
+                // Fallback for tests that use intentionally invalid tokens
+                request = request.header("x-bff-authenticated-user-id", "usr_invalid");
+            }
+        }
+    }
+
+    let response = request
+        .send()
+        .await
+        .with_context(|| format!("request failed for {url}"))?;
+
+    let status = response.status().as_u16();
+    let text = response
+        .text()
+        .await
+        .unwrap_or_default();
+
+    let parsed = if text.is_empty() {
+        None
+    } else {
+        serde_json::from_str::<Value>(&text).ok()
+    };
+
+    Ok(JsonResponse {
+        status,
+        body: parsed,
+        text,
+    })
 }
 
 pub async fn send_json_with_bff(
@@ -183,6 +264,7 @@ pub async fn send_json_with_bff(
     url: &str,
     bearer: Option<&str>,
     body: Option<Value>,
+    user_id: Option<&str>,
 ) -> Result<JsonResponse> {
     let request_path = request_path(url)?;
     let body_json = body
@@ -205,22 +287,37 @@ pub async fn send_json_with_bff(
             let timestamp = chrono::Utc::now().timestamp();
             let timestamp_str = timestamp.to_string();
             let payload = body_json.as_deref().unwrap_or("");
-            let canonical = format!(
+
+            // HMAC signing matching server's canonical payload format
+            // Server expects: timestamp\nMETHOD\npath\nbody
+            let canonical_payload = format!(
                 "{}\n{}\n{}\n{}",
                 timestamp_str,
                 method.as_str().to_uppercase(),
                 request_path,
                 payload
             );
-
             let mut mac = Hmac::<Sha256>::new_from_slice(env.signature_secret.as_bytes())
                 .map_err(|e| anyhow!("HMAC error: {}", e))?;
-            mac.update(canonical.as_bytes());
-            let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+            mac.update(canonical_payload.as_bytes());
+            let signature = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
 
             request = request
                 .header("x-auth-timestamp", timestamp_str)
                 .header("x-auth-signature", signature);
+        }
+    }
+
+    // Add the user ID header for BFF authentication
+    if request_path.starts_with("/bff") {
+        if let Some(uid) = user_id {
+            // Use explicitly provided user ID
+            request = request.header("x-bff-authenticated-user-id", uid);
+        } else if let Some(token) = bearer {
+            // Extract user ID from JWT token (the 'sub' claim)
+            if let Some(subject) = extract_subject_from_token(token) {
+                request = request.header("x-bff-authenticated-user-id", subject);
+            }
         }
     }
 
@@ -237,7 +334,7 @@ pub async fn send_json_with_bff(
     let text = response
         .text()
         .await
-        .with_context(|| format!("failed to read response body for {url}"))?;
+        .unwrap_or_default();
 
     let parsed = if text.is_empty() {
         None
@@ -259,7 +356,22 @@ fn request_path(url: &str) -> Result<String> {
 }
 
 fn should_sign_request(path: &str) -> bool {
-    path.starts_with("/bff") || path.starts_with("/staff") || path.starts_with("/kc")
+    path.starts_with("/bff") || path.starts_with("/staff")
+}
+
+fn extract_subject_from_token(token: &str) -> Option<String> {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    
+    let payload = parts[1];
+    if let Ok(decoded) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload) {
+        if let Ok(json) = serde_json::from_slice::<Value>(&decoded) {
+            return json.get("sub").and_then(|v| v.as_str()).map(|s| s.to_owned());
+        }
+    }
+    None
 }
 
 pub async fn get_client_token_and_subject(
@@ -309,7 +421,7 @@ fn jwt_subject(token: &str) -> Result<String> {
         .split('.')
         .nth(1)
         .ok_or_else(|| anyhow!("invalid jwt token format"))?;
-    let payload = URL_SAFE_NO_PAD
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(payload_segment)
         .context("failed to decode jwt payload")?;
     let payload_json: Value = serde_json::from_slice(&payload).context("invalid jwt payload")?;
@@ -345,7 +457,6 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
             r#"
             INSERT INTO app_user (
                 user_id,
-                realm,
                 username,
                 full_name,
                 phone_number,
@@ -356,7 +467,6 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 updated_at
             ) VALUES (
                 $1,
-                'e2e-testing',
                 $2,
                 'E2E Subject',
                 '+237690123456',
@@ -368,7 +478,6 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
             )
             ON CONFLICT (user_id) DO UPDATE
             SET
-                realm = EXCLUDED.realm,
                 username = EXCLUDED.username,
                 full_name = EXCLUDED.full_name,
                 phone_number = EXCLUDED.phone_number,
@@ -387,7 +496,6 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
             r#"
             INSERT INTO app_user (
                 user_id,
-                realm,
                 username,
                 full_name,
                 phone_number,
@@ -398,7 +506,6 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 updated_at
             ) VALUES (
                 'usr_e2e_staff_001',
-                'staff',
                 'e2e-staff',
                 'E2E Staff',
                 '+237690000001',
@@ -410,7 +517,6 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
             )
             ON CONFLICT (user_id) DO UPDATE
             SET
-                realm = EXCLUDED.realm,
                 username = EXCLUDED.username,
                 full_name = EXCLUDED.full_name,
                 phone_number = EXCLUDED.phone_number,
@@ -459,17 +565,15 @@ pub async fn create_foreign_deposit_fixture(
             r#"
             INSERT INTO app_user (
                 user_id,
-                realm,
                 username,
                 email_verified,
                 disabled,
                 attributes,
                 created_at,
                 updated_at
-            ) VALUES ($1, 'e2e-testing', $2, true, false, '{}'::jsonb, NOW(), NOW())
+            ) VALUES ($1, $2, true, false, '{}'::jsonb, NOW(), NOW())
             ON CONFLICT (user_id) DO UPDATE
             SET
-                realm = EXCLUDED.realm,
                 username = EXCLUDED.username,
                 email_verified = EXCLUDED.email_verified,
                 disabled = false,
@@ -596,7 +700,7 @@ pub async fn wait_for_otp(
             }
         }
 
-        sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
     Err(anyhow!("otp for {phone} not received within timeout"))

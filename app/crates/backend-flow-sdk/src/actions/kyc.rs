@@ -505,7 +505,8 @@ mod tests {
 
                 let updates = updates.unwrap();
                 let user_patch = updates.user_metadata_patch.unwrap();
-                assert_eq!(user_patch["kyc_status"], "VERIFIED");
+                // Check the nested structure: kyc.kyc_status
+                assert_eq!(user_patch["kyc"]["kyc_status"], "VERIFIED");
             }
             _ => panic!("Expected Done outcome"),
         }
@@ -532,7 +533,7 @@ mod tests {
 
                 let updates = updates.unwrap();
                 let user_patch = updates.user_metadata_patch.unwrap();
-                assert_eq!(user_patch["kyc_status"], "REJECTED");
+                assert_eq!(user_patch["kyc"]["kyc_status"], "REJECTED");
             }
             _ => panic!("Expected Done outcome"),
         }

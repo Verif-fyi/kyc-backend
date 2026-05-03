@@ -50,7 +50,6 @@ all-flows = [
 backend-auth = { workspace = true }
 backend-core = { workspace = true, features = ["axum"] }
 backend-flow-sdk = { workspace = true, optional = true }
-backend-id = { workspace = true }
 backend-repository = { workspace = true }
 backend-model = { workspace = true }
 backend-migrate = { workspace = true }
@@ -98,7 +97,6 @@ metrics-exporter-prometheus = { workspace = true }
 cuid = { workspace = true }
 getrandom = { workspace = true }
 
-gen_oas_server_kc = { workspace = true }
 gen_oas_client_cuss = { workspace = true }
 
 openssl = { workspace = true }

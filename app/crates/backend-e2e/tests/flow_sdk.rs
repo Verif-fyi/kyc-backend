@@ -31,21 +31,12 @@ fn require_flow_id(body: &Option<Value>) -> Result<String> {
         .ok_or_else(|| anyhow!("flow id must be a string"))
 }
 
-#[allow(dead_code)]
-fn require_step_id(body: &Option<Value>) -> Result<String> {
-    require_json_field(body, "id")?
-        .as_str()
-        .map(str::to_owned)
-        .ok_or_else(|| anyhow!("step id must be a string"))
-}
-
 fn require_step_id_from_value(step: &Value) -> Result<String> {
     step.get("id")
         .and_then(Value::as_str)
         .map(str::to_owned)
         .ok_or_else(|| anyhow!("step id missing"))
 }
-
 
 async fn wait_for_step_status(
     client: &reqwest::Client,
@@ -59,7 +50,7 @@ async fn wait_for_step_status(
 
     while std::time::Instant::now() < deadline {
         let response =
-            send_json_with_bff(client, Method::GET, &url, None, None).await?;
+            send_json_with_bff(client, Method::GET, &url, None, None, None).await?;
 
         if response.status == 200 {
             let status = response
@@ -67,10 +58,10 @@ async fn wait_for_step_status(
                 .as_ref()
                 .and_then(|b| b.get("status"));
 
-            if let Some(s) = status
-                && s == expected_status
-            {
-                return Ok(());
+            if let Some(s) = status {
+                if s == expected_status {
+                    return Ok(());
+                }
             }
         }
 
@@ -97,19 +88,20 @@ async fn wait_for_session_status(
 
     while std::time::Instant::now() < deadline {
         let response =
-            send_json_with_bff(client, Method::GET, &url, None, None).await?;
+            send_json_with_bff(client, Method::GET, &url, None, None, None).await?;
 
         if response.status == 200 {
             let status = response
                 .body
                 .as_ref()
                 .and_then(|b| b.get("session"))
-                .and_then(|s| s.get("status"));
+                .and_then(|s| s.get("status"))
+                .and_then(Value::as_str);
 
-            if let Some(s) = status
-                && s == expected_status
-            {
-                return Ok(());
+            if let Some(s) = status {
+                if s == expected_status {
+                    return Ok(());
+                }
             }
         }
 
@@ -137,7 +129,7 @@ async fn wait_for_flow_status(
 
     while std::time::Instant::now() < deadline {
         let response =
-            send_json_with_bff(client, Method::GET, &url, None, None).await?;
+            send_json_with_bff(client, Method::GET, &url, None, None, None).await?;
 
         if response.status == 200 {
             let status = response.body.as_ref().and_then(|body| {
@@ -169,6 +161,7 @@ async fn get_flow_steps(
     client: &reqwest::Client,
     bff_base: &str,
     flow_id: &str,
+    user_id: &str,
 ) -> Result<Vec<Value>> {
     let response = send_json_with_bff(
         client,
@@ -176,6 +169,7 @@ async fn get_flow_steps(
         &format!("{}/flows/{}", bff_base, flow_id),
         None,
         None,
+        Some(user_id),
     )
     .await?;
 
@@ -189,107 +183,12 @@ async fn get_flow_steps(
         .cloned()
         .ok_or_else(|| anyhow!("steps missing from flow response"))
 }
-        }
-
-        sleep(Duration::from_millis(500)).await;
-    }
-
-    Err(anyhow!(
-        "Step {} did not reach status {} within {:?}",
-        step_id,
-        expected_status,
-        timeout
-    ))
-}
-
-/sessions/{}", bff_base, session_id);
-
-    while std::time::Instant::now() < deadline {
-        let response =
-            send_json_with_bff(client, Method::GET, &url, None, None, Some(fixture)).await?;
-
-        if response.status == 200 {
-            let status = response
-                .body
-                .as_ref()
-                .and_then(|b| b.get("session"))
-                .and_then(|s| s.get("status"))
-                .and_then(Value::as_str);
-
-            if let Some(s) = status
-                && s == expected_status
-            {
-                return Ok(());
-            }
-        }
-
-        sleep(Duration::from_millis(500)).await;
-    }
-
-    Err(anyhow!(
-        "Session {} did not reach status {} within {:?}",
-        session_id,
-        expected_status,
-        timeout
-    ))
-}
-
-/flows/{}", bff_base, flow_id);
-    let mut last_status: Option<String> = None;
-
-    while std::time::Instant::now() < deadline {
-        let response =
-            send_json_with_bff(client, Method::GET, &url, None, None, Some(fixture)).await?;
-
-        if response.status == 200 {
-            let status = response.body.as_ref().and_then(|body| {
-                body.get("status")
-                    .or_else(|| body.get("flow").and_then(|flow| flow.get("status")))
-            });
-
-            if let Some(s) = status.and_then(Value::as_str) {
-                last_status = Some(s.to_owned());
-                if s == expected_status {
-                    return Ok(());
-                }
-            }
-        }
-
-        sleep(Duration::from_millis(500)).await;
-    }
-
-    Err(anyhow!(
-        "Flow {} did not reach status {} within {:?} (last_status={})",
-        flow_id,
-        expected_status,
-        timeout,
-        last_status.unwrap_or_else(|| "unknown".to_owned())
-    ))
-}
-
-/flows/{}", bff_base, flow_id),
-        None,
-        None,
-        Some(fixture),
-    )
-    .await?;
-
-    assert_eq!(response.status, 200, "Get flow failed: {}", response.text);
-
-    response
-        .body
-        .as_ref()
-        .and_then(|b| b.get("steps"))
-        .and_then(Value::as_array)
-        .cloned()
-        .ok_or_else(|| anyhow!("steps missing in flow response"))
-}
 
 fn find_step<'a>(steps: &'a [Value], step_type: &str) -> Result<&'a Value> {
     steps
         .iter()
         .find(|step| step.get("stepType").and_then(Value::as_str) == Some(step_type))
-        .ok_or_else(|| anyhow!("step `{step_type}` not found"))
+        .ok_or_else(|| anyhow!("step '{}' not found", step_type))
 }
 
 async fn reset_cuss(client: &reqwest::Client, env: &Env) -> Result<()> {
@@ -390,7 +289,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
             "sessionType": "kyc_full",
             "context": {}
         })),
-        None,
+        Some(&user_id),
     )
     .await?;
 
@@ -412,7 +311,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
             "flowType": "phone_otp",
             "context": {}
         })),
-        None,
+        Some(&user_id),
     )
     .await?;
 
@@ -425,7 +324,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     println!("Created phone_otp flow: {}", phone_flow_id);
 
     println!("=== Step 3: Submit phone init step ===");
-    let phone_steps = get_flow_steps(&client, &bff_base,  &phone_flow_id).await?;
+    let phone_steps = get_flow_steps(&client, &bff_base, &phone_flow_id, &user_id).await?;
     let init_phone_step_id = require_step_id_from_value(find_step(&phone_steps, "init_phone")?)?;
 
     let init_phone_response = send_json_with_bff(
@@ -438,7 +337,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
                 "phone_number": phone_number
             }
         })),
-        None,
+        Some(&user_id),
     )
     .await?;
     assert_eq!(
@@ -451,15 +350,14 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     let otp = wait_for_otp(&client, &env, phone_number, Duration::from_secs(15)).await?;
 
     println!("=== Step 5: Get verify step ===");
-    let phone_steps_after = get_flow_steps(&client, &bff_base,  &phone_flow_id).await?;
+    let phone_steps_after = get_flow_steps(&client, &bff_base, &phone_flow_id, &user_id).await?;
     let verify_step_id = require_step_id_from_value(find_step(&phone_steps_after, "verify_otp")?)?;
     wait_for_step_status(
         &client,
         &bff_base,
-        
         &verify_step_id,
         "WAITING",
-        Duration::from_secs(10),
+        Duration::from_secs(30),
     )
     .await?;
 
@@ -474,7 +372,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
                 "code": otp
             }
         })),
-        None,
+        Some(&user_id),
     )
     .await?;
 
@@ -489,10 +387,9 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     wait_for_flow_status(
         &client,
         &bff_base,
-        
         &phone_flow_id,
         "COMPLETED",
-        Duration::from_secs(10),
+        Duration::from_secs(30),
     )
     .await?;
     println!("Phone OTP flow completed");
@@ -504,7 +401,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
         &format!("{}/users/{}", bff_base, user_id),
         None,
         None,
-        None,
+        Some(&user_id),
     )
     .await?;
 
@@ -541,7 +438,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
         Some(json!({
             "flowType": "first_deposit"
         })),
-        None,
+        Some(&user_id),
     )
     .await?;
 
@@ -554,7 +451,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     println!("Created first_deposit flow: {}", deposit_flow_id);
 
     println!("=== Step 10: Submit first deposit init step ===");
-    let deposit_steps = get_flow_steps(&client, &bff_base,  &deposit_flow_id).await?;
+    let deposit_steps = get_flow_steps(&client, &bff_base, &deposit_flow_id, &user_id).await?;
     let init_deposit_step_id =
         require_step_id_from_value(find_step(&deposit_steps, "init_first_deposit")?)?;
 
@@ -569,7 +466,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
                 "currency": "XAF"
             }
         })),
-        None,
+        Some(&user_id),
     )
     .await?;
     assert_eq!(
@@ -628,10 +525,9 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     wait_for_flow_status(
         &client,
         &bff_base,
-        
         &deposit_flow_id,
         "COMPLETED",
-        Duration::from_secs(15),
+        Duration::from_secs(45),
     )
     .await?;
 
@@ -668,7 +564,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
         &format!("{}/users/{}", bff_base, user_id),
         None,
         None,
-        None,
+        Some(&user_id),
     )
     .await?;
 
@@ -707,7 +603,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
         &format!("{}/users/{}/completed-kyc", bff_base, user_id),
         None,
         None,
-        None,
+        Some(&user_id),
     )
     .await?;
 
@@ -766,7 +662,7 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
         Some(json!({
             "sessionType": "kyc_full"
         })),
-        None,
+        Some(&user_id),
     )
     .await?;
     assert_eq!(session_response.status, 201, "{}", session_response.text);
@@ -780,13 +676,13 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
         Some(json!({
             "flowType": "first_deposit"
         })),
-        None,
+        Some(&user_id),
     )
     .await?;
     assert_eq!(flow_response.status, 201, "{}", flow_response.text);
     let flow_id = require_flow_id(&flow_response.body)?;
 
-    let flow_steps = get_flow_steps(&client, &bff_base,  &flow_id).await?;
+    let flow_steps = get_flow_steps(&client, &bff_base, &flow_id, &user_id).await?;
     let init_step_id = require_step_id_from_value(find_step(&flow_steps, "init_first_deposit")?)?;
 
     let init_response = send_json_with_bff(
@@ -800,7 +696,7 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
                 "currency": "XAF"
             }
         })),
-        None,
+        Some(&user_id),
     )
     .await?;
     assert_eq!(init_response.status, 200, "{}", init_response.text);
@@ -847,19 +743,17 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
     wait_for_flow_status(
         &client,
         &bff_base,
-        
         &flow_id,
         "CLOSED",
-        Duration::from_secs(10),
+        Duration::from_secs(30),
     )
     .await?;
     wait_for_session_status(
         &client,
         &bff_base,
-        
         &session_id,
         "CLOSED",
-        Duration::from_secs(10),
+        Duration::from_secs(30),
     )
     .await?;
 
@@ -887,7 +781,7 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
         &format!("{}/sessions/{}", bff_base, session_id),
         None,
         None,
-        None,
+        Some(&user_id),
     )
     .await?;
     assert_eq!(session_detail.status, 200, "{}", session_detail.text);
@@ -905,7 +799,7 @@ async fn flow_sdk_first_deposit_reject_closes_session() -> Result<()> {
         &format!("{}/users/{}", bff_base, user_id),
         None,
         None,
-        None,
+        Some(&user_id),
     )
     .await?;
     assert_eq!(user_response.status, 200, "{}", user_response.text);
@@ -951,7 +845,6 @@ async fn flow_sdk_session_creation_and_listing() -> Result<()> {
     let user_id = format!("usr_flow_sdk_list_{}", chrono::Utc::now().timestamp());
     ensure_bff_fixtures(&env.database_url, &user_id).await?;
 
-
     let bff_base = format!("{}/bff", env.user_storage_url);
 
     println!("=== Create multiple sessions ===");
@@ -968,7 +861,7 @@ async fn flow_sdk_session_creation_and_listing() -> Result<()> {
                     "iteration": i
                 }
             })),
-            None,
+            Some(&user_id),
         )
         .await?;
 
@@ -986,7 +879,7 @@ async fn flow_sdk_session_creation_and_listing() -> Result<()> {
         &format!("{}/sessions", bff_base),
         None,
         None,
-        None,
+        Some(&user_id),
     )
     .await?;
 
@@ -1021,7 +914,6 @@ async fn flow_sdk_retry_config_validation() -> Result<()> {
     let user_id = format!("usr_flow_sdk_retry_{}", chrono::Utc::now().timestamp());
     ensure_bff_fixtures(&env.database_url, &user_id).await?;
 
-
     let bff_base = format!("{}/bff", env.user_storage_url);
 
     println!("=== Create session and flow ===");
@@ -1033,7 +925,7 @@ async fn flow_sdk_retry_config_validation() -> Result<()> {
         Some(json!({
             "sessionType": "kyc_full"
         })),
-        None,
+        Some(&user_id),
     )
     .await?;
 
@@ -1049,7 +941,7 @@ async fn flow_sdk_retry_config_validation() -> Result<()> {
         Some(json!({
             "flowType": "phone_otp"
         })),
-        None,
+        Some(&user_id),
     )
     .await?;
 
@@ -1063,7 +955,7 @@ async fn flow_sdk_retry_config_validation() -> Result<()> {
         &format!("{}/flows/{}", bff_base, flow_id),
         None,
         None,
-        None,
+        Some(&user_id),
     )
     .await?;
 

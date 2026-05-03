@@ -22,19 +22,18 @@ const FLOW_STATUS_COMPLETED: &str = "COMPLETED";
 const FLOW_STATUS_FAILED: &str = "FAILED";
 const FLOW_STATUS_CLOSED: &str = "CLOSED";
 
-pub async fn require_user_id(api: &BackendApi, headers: &HeaderMap) -> Result<String, Error> {
-    let claims = api.require_bff_claims(headers)?;
-    if claims.user_id.trim().is_empty() {
-        return Err(Error::unauthorized(
-            "Invalid signature-authenticated user id",
-        ));
-    }
-    if claims.device_id.trim().is_empty() {
-        return Err(Error::unauthorized(
-            "Invalid signature-authenticated device id",
-        ));
-    }
-    Ok(claims.user_id)
+pub async fn require_user_id(_api: &BackendApi, headers: &HeaderMap) -> Result<String, Error> {
+    let user_id = headers
+        .get(crate::api::BFF_AUTH_USER_ID_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_owned())
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| {
+            Error::unauthorized(
+                "Invalid signature-authenticated user id",
+            )
+        })?;
+    Ok(user_id)
 }
 
 #[instrument(skip(api))]
@@ -55,7 +54,7 @@ pub async fn create_session(
             )
         })?;
 
-    let session_id = backend_id::flow_session_id()?;
+    let session_id = backend_core::id::flow_session_id()?;
     let human_id = normalize_or_default_human_id(
         body.human_id,
         format!(
@@ -153,7 +152,7 @@ pub async fn add_flow_to_session(
 
     ensure_flow_step_exists(flow_definition, &initial_step)?;
 
-    let flow_id = backend_id::flow_instance_id()?;
+    let flow_id = backend_core::id::flow_instance_id()?;
     let flow_human_id = normalize_or_default_human_id(
         body.human_id,
         format!("{}.{}", session.human_id, flow_definition.human_id()),
@@ -505,7 +504,7 @@ pub(crate) async fn create_step_chain(
             .filter(|existing| existing.step_type == step_type)
             .count() as i32;
 
-        let step_id = backend_id::flow_step_id()?;
+        let step_id = backend_core::id::flow_step_id()?;
         let human_suffix = if attempt_no == 0 {
             step_definition.human_id().to_owned()
         } else {

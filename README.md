@@ -168,5 +168,4 @@ opencode run --help
 
 ## Notes
 
-- Device binding now relies on deterministic record IDs derived from the stored JWK; `lookup_device` updates `last_seen_at` so downstream systems can display accurate activity
-- Use `backend-id` helpers (`usr_*`, `dvc_*`, etc.) for all generated IDs to stay consistent with the system's conventions
+- Use `backend_core::id::*` helpers (`usr_*`, `session_*`, `flow_*`, etc.) for all generated IDs to stay consistent with the system's conventions

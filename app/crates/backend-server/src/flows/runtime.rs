@@ -60,7 +60,6 @@ impl UserLookupService for RepoUserLookup {
 
         Ok(Some(UserRecord {
             user_id: row.user_id,
-            realm: row.realm,
             username: row.username,
             full_name: row.full_name,
             email: row.email,

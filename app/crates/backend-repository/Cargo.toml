@@ -11,7 +11,6 @@ e2e-tests = ["dep:testcontainers", "dep:testcontainers-modules"]
 
 [dependencies]
 backend-core.workspace = true
-backend-id.workspace = true
 backend-model.workspace = true
 chrono.workspace = true
 deadpool-diesel.workspace = true
@@ -32,7 +31,6 @@ diesel = { workspace = true }
 
 [dev-dependencies]
 backend-migrate.workspace = true
-gen_oas_server_kc.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 anyhow.workspace = true
 openssl = { workspace = true, features = ["vendored"] }

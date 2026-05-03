@@ -26,7 +26,6 @@ diesel::table! {
     /// User accounts - primary key: user_id (CUID)
     app_user (user_id) {
         user_id -> Text,
-        realm -> Text,
         username -> Text,
         full_name -> Nullable<Text>,
         email -> Nullable<Text>,

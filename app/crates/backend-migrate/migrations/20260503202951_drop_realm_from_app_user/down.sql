@@ -1,0 +1,1 @@
+ALTER TABLE app_user ADD COLUMN realm TEXT NOT NULL DEFAULT 'default';

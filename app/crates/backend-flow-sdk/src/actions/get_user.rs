@@ -71,14 +71,12 @@ impl Step for GetUserAction {
         let patch = json!({
             "user_exists": true,
             "user_id": user.user_id,
-            "realm": user.realm,
             "username": user.username,
             "full_name": user.full_name,
             "email": user.email,
             "phone_number": user.phone_number,
             "user": {
                 "user_id": user.user_id,
-                "realm": user.realm,
                 "username": user.username,
                 "full_name": user.full_name,
                 "email": user.email,
@@ -125,12 +123,11 @@ mod tests {
         async fn get_user(&self, user_id: &str) -> Result<Option<UserRecord>, String> {
             Ok(Some(UserRecord {
                 user_id: user_id.to_owned(),
-                realm: "test".to_owned(),
-                username: "tester".to_owned(),
+                username: "test_user".to_owned(),
                 full_name: Some("Test User".to_owned()),
                 email: Some("test@example.com".to_owned()),
-                phone_number: Some("+237690000001".to_owned()),
-                metadata: json!({"level": "basic"}),
+                phone_number: Some("+1234567890".to_owned()),
+                metadata: json!({ "tier": "gold" }),
             }))
         }
     }

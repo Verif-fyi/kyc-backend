@@ -27,7 +27,6 @@ pub struct AppDepositRecipientRow {
 #[diesel(table_name = crate::schema::app_user)]
 pub struct UserRow {
     pub user_id: String,
-    pub realm: String,
     pub username: String,
     pub full_name: Option<String>,
     pub email: Option<String>,

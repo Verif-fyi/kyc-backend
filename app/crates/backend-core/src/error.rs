@@ -63,9 +63,6 @@ pub enum Error {
     #[error("Server Error: {0}")]
     Server(String),
 
-    #[error("S3 Error: {0}")]
-    S3(String),
-
     #[error("Address parse error: {0}")]
     AddrParseError(#[from] std::net::AddrParseError),
 
@@ -81,6 +78,9 @@ pub enum Error {
     #[error("Diesel pool error: {0}")]
     DieselPool(String),
 
+    #[error("S3 Error: {0}")]
+    S3(String),
+
     #[error("S3 presign config error: {0}")]
     AwsS3PresignConfig(#[from] aws_sdk_s3::presigning::PresigningConfigError),
 
@@ -94,6 +94,10 @@ pub enum Error {
         #[from] aws_sdk_sns::error::SdkError<aws_sdk_sns::operation::publish::PublishError>,
     ),
 
+    #[cfg(feature = "reqwest")]
+    #[error("HTTP request error: {0}")]
+    Reqwest(#[from] reqwest::Error),
+
     #[error("{message}")]
     Http {
         error_key: &'static str,
@@ -101,10 +105,12 @@ pub enum Error {
         message: String,
         context: Option<Value>,
     },
+}
 
-    #[cfg(feature = "reqwest")]
-    #[error("HTTP error: {0}")]
-    ServerHttp(#[from] reqwest::Error),
+impl From<String> for Error {
+    fn from(err: String) -> Self {
+        Error::Server(err)
+    }
 }
 
 impl Error {
