@@ -1,10 +1,14 @@
 use async_trait::async_trait;
+use backend_core::config::OrangeConfig;
 use backend_core::{Error, NotificationJob};
+use base64::Engine;
+use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::sleep;
-use tracing::info;
+use tracing::{debug, info};
 
 #[cfg(test)]
 use wiremock::{
@@ -202,6 +206,235 @@ impl SmsProvider for ApiSmsProvider {
                 "SMS_SEND_PERMANENT",
                 format!("SMS API client error ({}): {}", status, error_text),
             ))
+        }
+    }
+}
+
+/// Orange SMS provider
+pub struct OrangeSmsProvider {
+    client: reqwest::Client,
+    config: OrangeConfig,
+    token_cache: RwLock<Option<OrangeToken>>,
+    rate_limiter: Mutex<Instant>,
+}
+
+struct OrangeToken {
+    access_token: String,
+    expires_at: Instant,
+}
+
+#[derive(Deserialize)]
+struct OrangeTokenResponse {
+    access_token: String,
+    expires_in: u64,
+}
+
+impl OrangeSmsProvider {
+    pub fn new(client: reqwest::Client, config: OrangeConfig) -> Self {
+        Self {
+            client,
+            config,
+            token_cache: RwLock::new(None),
+            rate_limiter: Mutex::new(Instant::now()),
+        }
+    }
+
+    async fn get_valid_token(&self) -> Result<String, Error> {
+        // 1. Check cache
+        {
+            let cache = self.token_cache.read().await;
+            if let Some(token) = cache.as_ref() {
+                // Refresh 5 minutes before expiry
+                if token.expires_at > Instant::now() + Duration::from_secs(300) {
+                    return Ok(token.access_token.clone());
+                }
+            }
+        }
+
+        // 2. Fetch new token
+        let mut cache = self.token_cache.write().await;
+        // Re-check after acquiring write lock
+        if let Some(token) = cache.as_ref() {
+            if token.expires_at > Instant::now() + Duration::from_secs(300) {
+                return Ok(token.access_token.clone());
+            }
+        }
+
+        debug!("Fetching new Orange OAuth token");
+        let auth_header = format!(
+            "Basic {}",
+            base64::engine::general_purpose::STANDARD
+                .encode(format!("{}:{}", self.config.client_id, self.config.client_secret))
+        );
+
+        let response = self
+            .client
+            .post(&self.config.token_url)
+            .header("Authorization", auth_header)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .header("Accept", "application/json")
+            .body("grant_type=client_credentials")
+            .send()
+            .await
+            .map_err(|e| {
+                Error::internal(
+                    "SMS_AUTH_FAILED",
+                    format!("Failed to fetch Orange token: {}", e),
+                )
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(Error::internal(
+                "SMS_AUTH_FAILED",
+                format!("Orange token API returned {}: {}", status, body),
+            ));
+        }
+
+        let token_res: OrangeTokenResponse = response.json().await.map_err(|e| {
+            Error::internal(
+                "SMS_AUTH_FAILED",
+                format!("Failed to parse Orange token response: {}", e),
+            )
+        })?;
+
+        let access_token = token_res.access_token;
+        let expires_at = Instant::now() + Duration::from_secs(token_res.expires_in);
+
+        *cache = Some(OrangeToken {
+            access_token: access_token.clone(),
+            expires_at,
+        });
+
+        Ok(access_token)
+    }
+
+    fn normalize_msisdn(&self, msisdn: &str) -> Result<String, String> {
+        let mut digits: String = msisdn.chars().filter(|c| c.is_ascii_digit()).collect();
+
+        // Handle 00 prefix → convert to international
+        if digits.starts_with("00") {
+            digits = digits.trim_start_matches("00").to_string();
+        }
+
+        // Case 1: Already in international format (Cameroon)
+        if digits.starts_with("237") && digits.len() == 12 {
+            return Ok(format!("tel:+{}", digits));
+        }
+
+        // Case 2: Local Cameroon number (9 digits)
+        if digits.len() == 9 && (digits.starts_with('6') || digits.starts_with('2')) {
+            return Ok(format!("tel:+237{}", digits));
+        }
+
+        // Invalid number
+        Err(format!("Invalid MSISDN format: {}", msisdn))
+    }
+
+    async fn send_once(&self, msisdn: &str, otp: &str) -> Result<(), Error> {
+        let token = self.get_valid_token().await?;
+        let normalized_to = self.normalize_msisdn(msisdn).map_err(|e| {
+            Error::internal("SMS_SEND_PERMANENT", e)
+        })?;
+        let normalized_from = self.normalize_msisdn(&self.config.default_sender).map_err(|e| {
+            Error::internal("SMS_SEND_PERMANENT", e)
+        })?;
+
+        // Throttle to 5 SMS per second (200ms per request)
+        {
+            let mut last_send = self.rate_limiter.lock().await;
+            let now = Instant::now();
+            let elapsed = now.duration_since(*last_send);
+            let wait_time = Duration::from_millis(200);
+            if elapsed < wait_time {
+                sleep(wait_time - elapsed).await;
+            }
+            *last_send = Instant::now();
+        }
+
+        let url = format!(
+            "{}/outbound/{}/requests",
+            self.config.sms_base_url.trim_end_matches('/'),
+            urlencoding::encode(&normalized_from)
+        );
+
+        let payload = json!({
+            "outboundSMSMessageRequest": {
+                "address": normalized_to,
+                "senderAddress": normalized_from,
+                "outboundSMSTextMessage": {
+                    "message": format!("Your verification code is: {}", otp)
+                }
+            }
+        });
+
+        let response = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| {
+                Error::internal(
+                    "SMS_SEND_TRANSIENT",
+                    format!("Failed to contact Orange API: {}", e),
+                )
+            })?;
+
+        let status = response.status();
+        if status.is_success() {
+            Ok(())
+        } else if status == reqwest::StatusCode::UNAUTHORIZED {
+            // Token might be expired, clear cache
+            let mut cache = self.token_cache.write().await;
+            *cache = None;
+            Err(Error::internal(
+                "SMS_SEND_TRANSIENT",
+                "Orange API returned 401 Unauthorized, token cleared",
+            ))
+        } else if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            Err(Error::internal(
+                "SMS_SEND_TRANSIENT",
+                "Orange API rate limit exceeded (429)",
+            ))
+        } else if status.is_server_error() {
+            let body = response.text().await.unwrap_or_default();
+            Err(Error::internal(
+                "SMS_SEND_TRANSIENT",
+                format!("Orange API server error ({}): {}", status, body),
+            ))
+        } else {
+            let body = response.text().await.unwrap_or_default();
+            // Handle "Insufficient bundle" or other client errors as permanent
+            if body.contains("EXPIRED_QUOTA") || body.contains("OUT_OF_BALANCE") {
+                 Err(Error::internal(
+                    "SMS_SEND_PERMANENT",
+                    format!("Orange API reported insufficient balance: {}", body),
+                ))
+            } else {
+                Err(Error::internal(
+                    "SMS_SEND_PERMANENT",
+                    format!("Orange API client error ({}): {}", status, body),
+                ))
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl SmsProvider for OrangeSmsProvider {
+    async fn send_otp(&self, msisdn: &str, otp: &str) -> Result<(), Error> {
+        match self.send_once(msisdn, otp).await {
+            Ok(()) => Ok(()),
+            Err(e) if is_transient_error(&e) => {
+                // If it was a 401, send_once already cleared the token, so retry will fetch a new one
+                self.send_once(msisdn, otp).await
+            }
+            Err(e) => Err(e),
         }
     }
 }
@@ -448,6 +681,43 @@ mod tests {
             .await;
 
         let result = provider.send_otp("1234567890", "123456").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn orange_sms_provider_sends_sms() {
+        let server = MockServer::start().await;
+        let client = reqwest::Client::new();
+        let config = OrangeConfig {
+            client_id: "test_id".to_string(),
+            client_secret: "test_secret".to_string(),
+            token_url: format!("{}/token", server.uri()),
+            sms_base_url: server.uri(),
+            contract_url: "".to_string(),
+            default_sender: "+237000000000".to_string(),
+        };
+        let provider = OrangeSmsProvider::new(client, config);
+
+        // 1. Mock Token API
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": "test_token",
+                "expires_in": 3600
+            })))
+            .mount(&server)
+            .await;
+
+        // 2. Mock SMS API
+        let sender_path = urlencoding::encode("tel:+237000000000");
+        Mock::given(method("POST"))
+            .and(path(format!("/outbound/{}/requests", sender_path)))
+            .and(wiremock::matchers::header("Authorization", "Bearer test_token"))
+            .respond_with(ResponseTemplate::new(201))
+            .mount(&server)
+            .await;
+
+        let result = provider.send_otp("+237654066316", "123456").await;
         assert!(result.is_ok());
     }
 }

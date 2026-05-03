@@ -901,7 +901,7 @@ async fn approve_first_deposit(world: &mut FullE2eWorld) {
             admin_step_id
         ),
         Some(world.token().unwrap()),
-        Some(json!({ "input": { "decision": "APPROVED" } })),
+        Some(json!({ "input": { "decision": "APPROVED", "validated_deposited_amount": 500.0 } })),
     )
     .await
     {
@@ -939,7 +939,7 @@ async fn approve_first_deposit_expect_failure(world: &mut FullE2eWorld) {
             admin_step_id
         ),
         Some(world.token().unwrap()),
-        Some(json!({ "input": { "decision": "APPROVED" } })),
+        Some(json!({ "input": { "decision": "APPROVED", "validated_deposited_amount": 500.0 } })),
     )
     .await
     {
@@ -1587,7 +1587,7 @@ async fn cuss_payloads_match_first_deposit(world: &mut FullE2eWorld) {
     );
     assert_eq!(
         approve_request.pointer("/payload/depositAmount"),
-        Some(&json!(deposit_amount))
+        Some(&json!(500))
     );
     assert_eq!(
         approve_request.pointer("/payload/savingsAccountId"),

@@ -1,6 +1,6 @@
 import Fastify, { FastifyInstance, type FastifyReply } from 'fastify';
 
-type Endpoint = 'register' | 'approve' | 'webhook-auth-test';
+type Endpoint = 'register' | 'approve' | 'webhook-auth-test' | 'check-phone';
 
 interface FaultConfig {
   status: number;
@@ -25,6 +25,7 @@ const state = {
     register: null as FaultConfig | null,
     approve: null as FaultConfig | null,
     'webhook-auth-test': null as FaultConfig | null,
+    'check-phone': null as FaultConfig | null,
   } as Record<Endpoint, FaultConfig | null>,
   counter: 1,
 };
@@ -95,6 +96,22 @@ app.post('/api/registration/approve-and-deposit', async (req, reply) => {
   });
 });
 
+app.post('/api/registration/check-phone', async (req, reply) => {
+  if (tryFault('check-phone', reply)) {
+    return;
+  }
+
+  const payload = req.body as Record<string, unknown>;
+  const authHeader = req.headers.authorization;
+  record('check-phone', req.url, req.method, { ...payload, authHeader });
+
+  // Default behavior in e2e: phone is never already registered, so the gate
+  // continues to set_user_phone_number. Tests that need the duplicate-phone
+  // path inject a fault via /__admin/faults that returns
+  // { exists: true, externalId: "..." } on the next call.
+  reply.code(200).send({ exists: false });
+});
+
 app.post('/api/webhook-auth-test', async (req, reply) => {
   const authHeader = req.headers.authorization;
   record('webhook-auth-test', req.url, req.method, { authHeader });
@@ -115,6 +132,7 @@ app.post('/__admin/reset', async (_, reply) => {
     register: null,
     approve: null,
     'webhook-auth-test': null,
+    'check-phone': null,
   };
   state.counter = 1;
   reply.send({ reset: true });
@@ -128,8 +146,8 @@ app.post('/__admin/faults', async (req, reply) => {
     count?: number;
   };
 
-  if (!endpoint || !['register', 'approve', 'webhook-auth-test'].includes(endpoint)) {
-    reply.code(400).send({ error: 'endpoint must be register, approve, or webhook-auth-test' });
+  if (!endpoint || !['register', 'approve', 'webhook-auth-test', 'check-phone'].includes(endpoint)) {
+    reply.code(400).send({ error: 'endpoint must be register, approve, webhook-auth-test, or check-phone' });
     return;
   }
 

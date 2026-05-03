@@ -91,6 +91,10 @@ wiremock = { workspace = true, optional = true }
 aws-config = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-types = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+cuid = { workspace = true }
+getrandom = { workspace = true }
 
 gen_oas_server_kc = { workspace = true }
 gen_oas_client_cuss = { workspace = true }

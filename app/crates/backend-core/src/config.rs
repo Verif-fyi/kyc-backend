@@ -192,6 +192,7 @@ pub enum SmsProviderType {
     Sns,
     Api,
     Avlytext,
+    Orange,
 }
 
 /// SMS configuration for OTP delivery.
@@ -202,6 +203,8 @@ pub struct SmsConfig {
     pub api: Option<SmsApi>,
     #[serde(default)]
     pub avlytext: Option<AvlytextConfig>,
+    #[serde(default)]
+    pub orange: Option<OrangeConfig>,
 }
 
 /// Third-party SMS API configuration.
@@ -217,6 +220,17 @@ pub struct AvlytextConfig {
     pub base_url: String,
     pub api_key: String,
     pub sender_id: String,
+}
+
+/// Orange SMS provider configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrangeConfig {
+    pub client_id: String,
+    pub client_secret: String,
+    pub token_url: String,
+    pub sms_base_url: String,
+    pub contract_url: String,
+    pub default_sender: String,
 }
 
 /// Flow configuration for YAML-based flow and session definitions.

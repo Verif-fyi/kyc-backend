@@ -134,6 +134,20 @@ sms:
     api_key: ""
     # Sender ID shown in SMS messages (requires approval).
     sender_id: ""
+  # Orange API configuration (used when provider=orange).
+  orange:
+    # Orange OAuth client ID.
+    client_id: ""
+    # Orange OAuth client secret.
+    client_secret: ""
+    # Orange OAuth token URL.
+    token_url: "https://api.orange.com/oauth/v3/token"
+    # Orange SMS messaging API base URL.
+    sms_base_url: "https://api.orange.com/smsmessaging/v1"
+    # Orange SMS admin API (for contracts).
+    contract_url: "https://api.orange.com/sms/admin/v1"
+    # Orange default sender phone number (+237...).
+    default_sender: "690494946"
 
 # OAuth2 / OIDC Configuration
 # JWT token validation settings for API authentication.

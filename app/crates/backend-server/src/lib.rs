@@ -9,6 +9,7 @@ pub(crate) mod api;
 pub(crate) mod auth_signature;
 pub(crate) mod flows;
 pub(crate) mod health;
+pub mod metrics;
 pub(crate) mod object_storage;
 pub(crate) mod state;
 pub(crate) mod swagger;
@@ -25,6 +26,7 @@ use backend_auth::signature_layer;
 use backend_core::{Config, Result};
 use backend_migrate::connect_postgres_and_migrate;
 use hyper::StatusCode;
+use metrics_exporter_prometheus::PrometheusHandle;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 use tracing::info;
@@ -32,6 +34,7 @@ use tracing::info;
 /// Starts the HTTP server with all API surfaces and background workers.
 pub async fn serve(core_config: &Config, imports: flow_registry::RegistryImports) -> Result<()> {
     let listen_addr = core_config.api_listen_addr()?;
+    let prometheus_handle = metrics::install_prometheus_recorder();
     let pool = connect_postgres_and_migrate(&core_config.database.url).await?;
     let state = Arc::new(state::AppState::from_config(core_config, pool, imports).await?);
 
@@ -195,11 +198,17 @@ fn build_router(
                         .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
                         .map(|ci| ci.0.to_string())
                         .unwrap_or_else(|| "unknown".to_string());
+                    let correlation_id = req
+                        .headers()
+                        .get("X-Correlation-ID")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("-");
                     tracing::info_span!(
                         "http-request",
                         method = %req.method(),
                         path = %request_path(req),
                         remote_addr = %remote_addr,
+                        correlation_id = %correlation_id,
                     )
                 })
                 .on_request(|req: &HttpRequest<_>, _span: &tracing::Span| {

@@ -528,7 +528,8 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
         Some(&staff_token),
         Some(json!({
             "input": {
-                "decision": "APPROVED"
+                "decision": "APPROVED",
+                "validated_deposited_amount": 500.0
             }
         })),
     )
@@ -573,7 +574,7 @@ async fn flow_sdk_session_with_phone_otp_and_first_deposit() -> Result<()> {
     );
     assert_eq!(
         approve_request.pointer("/payload/depositAmount"),
-        Some(&json!(5000))
+        Some(&json!(500))
     );
 
     println!("=== Step 14: Get user metadata ===");

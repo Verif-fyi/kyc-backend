@@ -165,10 +165,19 @@ impl Step for CussApproveStep {
             })?;
 
         let deposit_amount = ctx
-            .session_context
-            .get("deposit_amount")
-            .and_then(|v| v.as_str())
-            .and_then(|s| s.parse::<f64>().ok());
+            .flow_context
+            .get("amount")
+            .or_else(|| ctx.session_context.get("deposit_amount"))
+            .or_else(|| ctx.session_context.get("amount"))
+            .and_then(|v| {
+                if let Some(f) = v.as_f64() {
+                    Some(f)
+                } else if let Some(s) = v.as_str() {
+                    s.parse::<f64>().ok()
+                } else {
+                    None
+                }
+            });
 
         let mut request = ApproveAndDepositRequest::new(savings_account_id);
         request.deposit_amount = deposit_amount;

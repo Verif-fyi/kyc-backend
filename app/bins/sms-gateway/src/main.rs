@@ -5,7 +5,7 @@ use clap::Parser;
 use mimalloc::MiMalloc;
 use sms_provider::{
     is_permanent_error, process_notification_job, ApiSmsProvider, AvlytextSmsProvider,
-    ConsoleSmsProvider, SnsSmsProvider,
+    ConsoleSmsProvider, OrangeSmsProvider, SnsSmsProvider,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -134,6 +134,17 @@ async fn create_sms_provider(
                 avlytext_config.base_url.clone(),
                 avlytext_config.api_key.clone(),
                 avlytext_config.sender_id.clone(),
+            )))
+        }
+        SmsProviderType::Orange => {
+            let orange_config = config.orange.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("Orange configuration is required when provider is 'orange'")
+            })?;
+            info!("Using Orange SMS provider: {}", orange_config.sms_base_url);
+            let client = reqwest::Client::new();
+            Ok(Arc::new(OrangeSmsProvider::new(
+                client,
+                orange_config.clone(),
             )))
         }
     }

@@ -95,7 +95,69 @@ steps:
       message: "Phone OTP verified"
       flow_pointers:
       - /step_output/verify_otp
-    next: set_user_phone_number
+    next: check_phone_unique
+
+  # Cuss-side phone-uniqueness gate. We hit cuss as soon as the user has
+  # proved phone ownership; if the phone is already linked to another
+  # Fineract client we end the flow with FAILED rather than letting the
+  # user continue through legal acceptance + admin review only to wedge
+  # at cuss_register_customer in the first_deposit flow.
+  #
+  # POST + JSON body (not GET + ?phone=...) so the literal `+` in E.164
+  # phones survives transit — Spring's @RequestParam decodes `+` as
+  # space, which would break every lookup.
+  check_phone_unique:
+    action: WEBHOOK_HTTP
+    actor: SYSTEM
+    config:
+      url: "${CUSS_URL}/api/registration/check-phone"
+      method: POST
+      timeout_ms: 5000
+      retryable: false
+      auth:
+        type: oauth2
+        token_url: "${KC_TOKEN_URL}"
+        client_id: "${CUSS_CLIENT_ID}"
+        client_secret: "${CUSS_CLIENT_SECRET}"
+      payload_mappings:
+        - source: session
+          source_path: /phone_number
+          target_path: /phone
+      success_condition:
+        status_codes: [200]
+      extraction_rules:
+        - json_pointer: /exists
+          target_path: /phone_already_registered
+          target_context: flow_context
+        - json_pointer: /externalId
+          target_path: /existing_external_id_for_phone
+          target_context: flow_context
+    next: gate_phone_uniqueness
+    fail: FAILED
+
+  gate_phone_uniqueness:
+    action: CONDITIONAL
+    actor: SYSTEM
+    config:
+      source: flow
+      pointer: /phone_already_registered
+      cases:
+        "true": phone_already_registered_terminal
+        "false": continue_to_set_phone
+      default_branch: continue_to_set_phone
+    branches:
+      phone_already_registered_terminal: phone_already_registered_terminal
+      continue_to_set_phone: set_user_phone_number
+    fail: FAILED
+
+  phone_already_registered_terminal:
+    action: DEBUG_LOG
+    actor: SYSTEM
+    config:
+      message: "Phone OTP gate: phone is already linked to another Fineract client"
+      flow_pointers:
+      - /existing_external_id_for_phone
+    next: FAILED
 
   set_user_phone_number:
     action: update-phone-number
