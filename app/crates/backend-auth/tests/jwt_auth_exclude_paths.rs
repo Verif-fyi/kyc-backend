@@ -76,14 +76,14 @@ async fn signature_rejects_when_timestamp_header_is_missing() {
         .unwrap();
     request
         .headers_mut()
-        .insert("x-kc-signature", HeaderValue::from_static("any"));
+        .insert("x-auth-signature", HeaderValue::from_static("any"));
 
     let state = build_signature_state(&cfg);
     let result = require_signature(cfg.enabled, &state, request).await;
 
     assert!(result.is_err());
     let payload = read_error_body(result.err().unwrap()).await;
-    assert_eq!(payload["message"], "Missing x-kc-timestamp");
+    assert_eq!(payload["message"], "Missing x-auth-timestamp");
 }
 
 #[tokio::test]
@@ -99,7 +99,7 @@ async fn signature_rejects_when_signature_header_is_missing() {
 
     assert!(result.is_err());
     let payload = read_error_body(result.err().unwrap()).await;
-    assert_eq!(payload["message"], "Missing x-kc-signature");
+    assert_eq!(payload["message"], "Missing x-auth-signature");
 }
 
 #[tokio::test]
@@ -107,7 +107,7 @@ async fn signature_layer_rejects_requests_without_headers() {
     let cfg = build_kc_auth();
     let state = Arc::new(build_signature_state(&cfg));
     let router = Router::new()
-        .route("/v1/users", get(|| async { "ok" }))
+        .route("/v1/users", axum::routing::post(|| async { "ok" }))
         .layer(signature_layer(cfg.enabled, state));
 
     let response = router
@@ -132,21 +132,21 @@ async fn signature_accepts_valid_signature() {
     
     let state = Arc::new(build_signature_state(&cfg));
     let router = Router::new()
-        .route("/v1/users", get(|| async { "ok" }))
+        .route("/v1/users", axum::routing::post(|| async { "ok" }))
         .layer(signature_layer(cfg.enabled, state));
 
     let mut request = Request::builder()
-        .method("GET")
+        .method("POST")
         .uri("/v1/users")
         .body(Body::from(body))
         .unwrap();
     request.headers_mut().insert(
-        "x-kc-timestamp",
+        "x-auth-timestamp",
         HeaderValue::from_str(&timestamp.to_string()).unwrap(),
     );
     request
         .headers_mut()
-        .insert("x-kc-signature", HeaderValue::from_str(&signature).unwrap());
+        .insert("x-auth-signature", HeaderValue::from_str(&signature).unwrap());
 
     let response = router.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);

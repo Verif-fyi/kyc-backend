@@ -93,6 +93,8 @@ services:
       - config/dev.yaml
     volumes:
       - ../../config:/app/config/
+    ports:
+      - "3000:3000"
     environment:
       <<: *env
     depends_on:
@@ -105,6 +107,8 @@ services:
 
   cuss-wiremock:
     image: wiremock/wiremock:3.13.1
+    ports:
+      - "8080:8080"
     command:
       - --disable-banner
       - --verbose

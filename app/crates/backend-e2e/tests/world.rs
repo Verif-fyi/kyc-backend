@@ -3,85 +3,13 @@
 use anyhow::{Context, Result, anyhow};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use cucumber::World;
-use p256::ecdsa::{Signature, SigningKey, signature::Signer};
-use rand_core::OsRng;
+use hmac::{Hmac, Mac};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
-use std::sync::{LazyLock, Mutex};
+use sha2::Sha256;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use tokio_postgres::NoTls;
-
-const E2E_BFF_DEVICE_ID: &str = "dvc_e2e_bff_signature";
-const E2E_BFF_DEVICE_JKT: &str = "jkt_e2e_bff_signature";
-
-static BFF_FIXTURE: LazyLock<Mutex<Option<BffTestFixture>>> = LazyLock::new(|| Mutex::new(None));
-
-#[derive(Clone)]
-pub struct BffTestFixture {
-    pub device_id: String,
-    pub user_id: String,
-    pub jkt: String,
-    pub public_jwk: String,
-    pub signing_key: SigningKey,
-}
-
-impl BffTestFixture {
-    pub fn generate(user_id: &str) -> Self {
-        let signing_key = SigningKey::random(&mut OsRng);
-        let verifying_key = signing_key.verifying_key();
-        let point = verifying_key.to_encoded_point(false);
-
-        let x = URL_SAFE_NO_PAD.encode(point.x().unwrap());
-        let y = URL_SAFE_NO_PAD.encode(point.y().unwrap());
-
-        let public_jwk = format!(
-            r#"{{"kty":"EC","crv":"P-256","alg":"ES256","x":"{}","y":"{}"}}"#,
-            x, y
-        );
-
-        Self {
-            device_id: E2E_BFF_DEVICE_ID.to_owned(),
-            user_id: user_id.to_owned(),
-            jkt: E2E_BFF_DEVICE_JKT.to_owned(),
-            public_jwk,
-            signing_key,
-        }
-    }
-
-    pub fn get() -> Option<Self> {
-        BFF_FIXTURE.lock().ok().and_then(|guard| guard.clone())
-    }
-
-    pub fn sign_bff_request(&self, canonical_payload: &str) -> String {
-        let signature: Signature = self.signing_key.sign(canonical_payload.as_bytes());
-        URL_SAFE_NO_PAD.encode(signature.to_bytes())
-    }
-
-    pub fn build_canonical_payload(
-        &self,
-        timestamp: i64,
-        nonce: &str,
-        _method: &str,
-        _path: &str,
-        _body: &str,
-        _user_id_hint: Option<&str>,
-    ) -> String {
-        let escaped_public_key = self.public_jwk.replace('\\', "\\\\").replace('"', "\\\"");
-        format!(
-            r#"{{"deviceId":"{}","publicKey":"{}","ts":"{}","nonce":"{}"}}"#,
-            self.device_id, escaped_public_key, timestamp, nonce
-        )
-    }
-
-    pub fn store_global(self) -> &'static Self {
-        if let Ok(mut guard) = BFF_FIXTURE.lock() {
-            *guard = Some(self.clone());
-        }
-        Box::leak(Box::new(self))
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct Env {
@@ -96,6 +24,7 @@ pub struct Env {
     pub database_url: String,
     pub keycloak_client_id: String,
     pub keycloak_client_secret: String,
+    pub signature_secret: String,
 }
 
 impl Env {
@@ -112,6 +41,7 @@ impl Env {
             database_url: must_env("DATABASE_URL")?,
             keycloak_client_id: must_env("KEYCLOAK_CLIENT_ID")?,
             keycloak_client_secret: must_env("KEYCLOAK_CLIENT_SECRET")?,
+            signature_secret: must_env("SIGNATURE_SECRET")?,
         })
     }
 }
@@ -177,7 +107,7 @@ pub async fn send_json(
     bearer: Option<&str>,
     body: Option<Value>,
 ) -> Result<JsonResponse> {
-    send_json_with_bff(client, method, url, bearer, body, None).await
+    send_json_with_bff(client, method, url, bearer, body).await
 }
 
 pub async fn send_json_with_bff(
@@ -186,7 +116,6 @@ pub async fn send_json_with_bff(
     url: &str,
     bearer: Option<&str>,
     body: Option<Value>,
-    bff_fixture: Option<&BffTestFixture>,
 ) -> Result<JsonResponse> {
     let request_path = request_path(url)?;
     let body_json = body
@@ -203,32 +132,27 @@ pub async fn send_json_with_bff(
         request = request.header(AUTHORIZATION, format!("Bearer {token}"));
     }
 
-    let should_sign = should_sign_bff_request(&request_path);
+    let should_sign = should_sign_request(&request_path);
     if should_sign {
-        let fixture = bff_fixture.cloned().or_else(BffTestFixture::get);
-
-        if let Some(fixture) = fixture {
+        if let Ok(env) = Env::from_env() {
             let timestamp = chrono::Utc::now().timestamp();
-            let nonce = format!(
-                "e2e-{}",
-                chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
-            );
+            let timestamp_str = timestamp.to_string();
             let payload = body_json.as_deref().unwrap_or("");
-            let canonical = fixture.build_canonical_payload(
-                timestamp,
-                &nonce,
-                method.as_str(),
-                &request_path,
-                payload,
-                None,
+            let canonical = format!(
+                "{}\n{}\n{}\n{}",
+                timestamp_str,
+                method.as_str().to_uppercase(),
+                request_path,
+                payload
             );
-            let signature = fixture.sign_bff_request(&canonical);
+
+            let mut mac = Hmac::<Sha256>::new_from_slice(env.signature_secret.as_bytes())
+                .map_err(|e| anyhow!("HMAC error: {}", e))?;
+            mac.update(canonical.as_bytes());
+            let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
 
             request = request
-                .header("x-auth-device-id", &fixture.device_id)
-                .header("x-auth-signature-timestamp", timestamp.to_string())
-                .header("x-auth-public-key", &fixture.public_jwk)
-                .header("x-auth-nonce", nonce)
+                .header("x-auth-timestamp", timestamp_str)
                 .header("x-auth-signature", signature);
         }
     }
@@ -267,8 +191,8 @@ fn request_path(url: &str) -> Result<String> {
         .map_err(|error| anyhow!("invalid URL `{url}`: {error}"))
 }
 
-fn should_sign_bff_request(path: &str) -> bool {
-    path == "/bff" || path.starts_with("/bff/")
+fn should_sign_request(path: &str) -> bool {
+    path.starts_with("/bff") || path.starts_with("/staff") || path.starts_with("/kc")
 }
 
 pub async fn get_client_token_and_subject(
@@ -331,7 +255,6 @@ fn jwt_subject(token: &str) -> Result<String> {
 
 pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()> {
     let normalized_user_id = normalize_user_id(user_id);
-    let fixture = BffTestFixture::generate(&normalized_user_id);
 
     let (client, connection) = tokio_postgres::connect(database_url, NoTls)
         .await
@@ -354,6 +277,7 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 username,
                 full_name,
                 phone_number,
+                email_verified,
                 disabled,
                 created_at,
                 updated_at
@@ -363,6 +287,7 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 $2,
                 'E2E Subject',
                 '+237690123456',
+                true,
                 false,
                 NOW(),
                 NOW()
@@ -373,6 +298,7 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 username = EXCLUDED.username,
                 full_name = EXCLUDED.full_name,
                 phone_number = EXCLUDED.phone_number,
+                email_verified = EXCLUDED.email_verified,
                 disabled = false,
                 updated_at = NOW()
             "#,
@@ -390,6 +316,7 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 username,
                 full_name,
                 phone_number,
+                email_verified,
                 disabled,
                 created_at,
                 updated_at
@@ -399,6 +326,7 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 'e2e-staff',
                 'E2E Staff',
                 '+237690000001',
+                true,
                 false,
                 NOW(),
                 NOW()
@@ -409,6 +337,7 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
                 username = EXCLUDED.username,
                 full_name = EXCLUDED.full_name,
                 phone_number = EXCLUDED.phone_number,
+                email_verified = EXCLUDED.email_verified,
                 disabled = false,
                 updated_at = NOW()
             "#,
@@ -417,56 +346,6 @@ pub async fn ensure_bff_fixtures(database_url: &str, user_id: &str) -> Result<()
         .await
         .context("failed to upsert staff user fixture")?;
 
-    let device_record_id = {
-        let hash = Sha256::digest(fixture.public_jwk.as_bytes());
-        format!("{}:{:x}", fixture.device_id, hash)
-    };
-    client
-        .execute(
-            r#"
-            INSERT INTO device (
-                device_id,
-                user_id,
-                jkt,
-                public_jwk,
-                device_record_id,
-                status,
-                label,
-                created_at,
-                last_seen_at
-            ) VALUES (
-                $1,
-                $2,
-                $3,
-                $4,
-                $5,
-                'ACTIVE',
-                'e2e-signature-device',
-                NOW(),
-                NOW()
-            )
-            ON CONFLICT (device_id) DO UPDATE
-            SET
-                user_id = EXCLUDED.user_id,
-                jkt = EXCLUDED.jkt,
-                public_jwk = EXCLUDED.public_jwk,
-                device_record_id = EXCLUDED.device_record_id,
-                status = 'ACTIVE',
-                label = EXCLUDED.label,
-                last_seen_at = NOW()
-            "#,
-            &[
-                &fixture.device_id,
-                &fixture.user_id,
-                &fixture.jkt,
-                &fixture.public_jwk,
-                &device_record_id,
-            ],
-        )
-        .await
-        .context("failed to upsert bff signature device fixture")?;
-
-    fixture.store_global();
     Ok(())
 }
 

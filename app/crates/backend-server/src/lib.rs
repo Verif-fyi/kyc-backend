@@ -22,19 +22,20 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::Request as HttpRequest;
 use axum::response::Response;
+use axum_server::tls_rustls::RustlsConfig;
 use backend_auth::signature_layer;
 use backend_core::{Config, Result};
 use backend_migrate::connect_postgres_and_migrate;
 use hyper::StatusCode;
-use metrics_exporter_prometheus::PrometheusHandle;
+use rustls::server::WebPkiClientVerifier;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
-use tracing::info;
+use tracing::{info, error};
 
 /// Starts the HTTP server with all API surfaces and background workers.
 pub async fn serve(core_config: &Config, imports: flow_registry::RegistryImports) -> Result<()> {
     let listen_addr = core_config.api_listen_addr()?;
-    let prometheus_handle = metrics::install_prometheus_recorder();
+    let _prometheus_handle = metrics::install_prometheus_recorder();
     let pool = connect_postgres_and_migrate(&core_config.database.url).await?;
     let state = Arc::new(state::AppState::from_config(core_config, pool, imports).await?);
 
@@ -56,8 +57,57 @@ pub async fn serve(core_config: &Config, imports: flow_registry::RegistryImports
 
     match core_config.api_tls_files() {
         Some((cert_path, key_path)) => {
-            let rustls_config =
-                axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path).await?;
+            let mut rustls_config =
+                RustlsConfig::from_pem_file(cert_path.clone(), key_path.clone()).await?;
+
+            if let Some(client_ca_path) = &core_config.server.tls.client_ca_path {
+                info!("Enabling mTLS with client CA: {}", client_ca_path);
+                let ca_file = std::fs::File::open(client_ca_path).map_err(|e| {
+                    error!("Failed to open client CA file: {}", e);
+                    backend_core::Error::Server(e.to_string())
+                })?;
+                let mut reader = std::io::BufReader::new(ca_file);
+                let certs = rustls_pemfile::certs(&mut reader)
+                    .map(|res| res.map_err(|e| e.into()))
+                    .collect::<std::result::Result<Vec<_>, backend_core::Error>>()?;
+
+                let mut root_store = rustls::RootCertStore::empty();
+                for cert in certs {
+                    root_store.add(cert).map_err(|e| {
+                        error!("Failed to add client CA cert: {}", e);
+                        backend_core::Error::Server(e.to_string())
+                    })?;
+                }
+
+                let verifier = WebPkiClientVerifier::builder(Arc::new(root_store))
+                    .build()
+                    .map_err(|e| {
+                        error!("Failed to build client cert verifier: {}", e);
+                        backend_core::Error::Server(e.to_string())
+                    })?;
+
+                // Load server cert and key again for manual config
+                let cert_file = std::fs::File::open(cert_path).map_err(|e| backend_core::Error::Server(e.to_string()))?;
+                let mut cert_reader = std::io::BufReader::new(cert_file);
+                let server_certs = rustls_pemfile::certs(&mut cert_reader)
+                    .map(|res| res.map_err(|e| e.into()))
+                    .collect::<std::result::Result<Vec<_>, backend_core::Error>>()?;
+
+                let key_file = std::fs::File::open(key_path).map_err(|e| backend_core::Error::Server(e.to_string()))?;
+                let mut key_reader = std::io::BufReader::new(key_file);
+                let key = rustls_pemfile::private_key(&mut key_reader)
+                    .map_err(|e| backend_core::Error::Server(e.to_string()))?
+                    .ok_or_else(|| backend_core::Error::Server("No private key found".to_string()))?;
+
+                let server_config = rustls::ServerConfig::builder()
+                    .with_client_cert_verifier(verifier)
+                    .with_single_cert(server_certs, key)
+                    .map_err(|e| {
+                        error!("Failed to create mTLS server config: {}", e);
+                        backend_core::Error::Server(e.to_string())
+                    })?;
+                rustls_config = RustlsConfig::from_config(Arc::new(server_config));
+            }
 
             axum_server::bind_rustls(listen_addr, rustls_config)
                 .handle(handle)
@@ -152,7 +202,7 @@ fn build_router(
     api: api::BackendApi,
     config: &Config,
 ) -> Router {
-    let mut router = Router::new().merge(health::health_router());
+    let mut router = Router::new();
 
     // Global signature layer for all API surfaces
     let sig_layer = signature_layer(config.kc.enabled, api.signature_state.clone());
@@ -182,6 +232,9 @@ fn build_router(
 
     // Apply the signature layer to all routers (except health and swagger)
     router = router.layer(sig_layer);
+
+    // Merge health router AFTER signature layer so it's public
+    router = router.merge(health::health_router());
 
     // Mount Swagger UI
     router = router.merge(Into::<Router>::into(swagger::swagger_ui(&config)));

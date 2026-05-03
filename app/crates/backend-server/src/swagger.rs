@@ -39,7 +39,7 @@ pub fn swagger_ui(config: &Config) -> SwaggerUi {
     let mut staff_spec = StaffFlowOpenApi::openapi();
 
     // Create the Signature security scheme
-    let signature_scheme = SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::new("x-kc-signature")));
+    let signature_scheme = SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::new("x-auth-signature")));
 
     // Build host URL from swagger config or fall back to server config
     let http_host = if let Some(http_host) = &config.swagger.http_host {
@@ -53,13 +53,13 @@ pub fn swagger_ui(config: &Config) -> SwaggerUi {
     let staff_base = config.staff.base_path.trim();
 
     // Helper to create security requirements
-    let make_signature_req = || SecurityRequirement::new("KcSignature", iter::empty::<String>());
+    let make_signature_req = || SecurityRequirement::new("AuthSignature", iter::empty::<String>());
 
     // Add security scheme and requirement to BFF spec
     if let Some(components) = bff_spec.components.as_mut() {
         components
             .security_schemes
-            .insert("KcSignature".to_string(), signature_scheme.clone());
+            .insert("AuthSignature".to_string(), signature_scheme.clone());
     }
     bff_spec.security = Some(vec![make_signature_req()]);
     // Add server URL with /bff prefix so paths resolve correctly
@@ -69,7 +69,7 @@ pub fn swagger_ui(config: &Config) -> SwaggerUi {
     if let Some(components) = uploads_spec.components.as_mut() {
         components
             .security_schemes
-            .insert("KcSignature".to_string(), signature_scheme.clone());
+            .insert("AuthSignature".to_string(), signature_scheme.clone());
     }
     uploads_spec.security = Some(vec![make_signature_req()]);
     uploads_spec.servers = Some(vec![Server::new(&http_host)]);
@@ -78,7 +78,7 @@ pub fn swagger_ui(config: &Config) -> SwaggerUi {
     if let Some(components) = staff_spec.components.as_mut() {
         components
             .security_schemes
-            .insert("KcSignature".to_string(), signature_scheme.clone());
+            .insert("AuthSignature".to_string(), signature_scheme.clone());
     }
     staff_spec.security = Some(vec![make_signature_req()]);
     staff_spec.servers = Some(vec![Server::new(&format!("{}{}", http_host, staff_base))]);

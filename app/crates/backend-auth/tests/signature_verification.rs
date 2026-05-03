@@ -32,8 +32,8 @@ fn test_signature_verification_success() {
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
 
     let mut headers = HeaderMap::new();
-    headers.insert("x-kc-signature", signature.parse().unwrap());
-    headers.insert("x-kc-timestamp", timestamp.parse().unwrap());
+    headers.insert("x-auth-signature", signature.parse().unwrap());
+    headers.insert("x-auth-timestamp", timestamp.parse().unwrap());
 
     let result = state.verify_signature(&method, &uri, &headers, body.as_bytes());
     assert!(result.is_ok());
@@ -54,8 +54,8 @@ fn test_signature_verification_invalid_signature() {
     let body = r#"{"device_id":"dvc_123"}"#;
 
     let mut headers = HeaderMap::new();
-    headers.insert("x-kc-signature", "invalid-signature".parse().unwrap());
-    headers.insert("x-kc-timestamp", timestamp.parse().unwrap());
+    headers.insert("x-auth-signature", "invalid-signature".parse().unwrap());
+    headers.insert("x-auth-timestamp", timestamp.parse().unwrap());
 
     let result = state.verify_signature(&method, &uri, &headers, body.as_bytes());
     assert!(result.is_err());
@@ -76,8 +76,8 @@ fn test_signature_verification_timestamp_skew() {
     let body = r#"{"device_id":"dvc_123"}"#;
 
     let mut headers = HeaderMap::new();
-    headers.insert("x-kc-signature", "some-sig".parse().unwrap());
-    headers.insert("x-kc-timestamp", timestamp.parse().unwrap());
+    headers.insert("x-auth-signature", "some-sig".parse().unwrap());
+    headers.insert("x-auth-timestamp", timestamp.parse().unwrap());
 
     let result = state.verify_signature(&method, &uri, &headers, body.as_bytes());
     assert!(result.is_err());

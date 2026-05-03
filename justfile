@@ -116,10 +116,10 @@ test-e2e-rust:
 	cargo test -p backend-auth --features e2e-tests --test oidc_wiremock_e2e
 
 test-cucumber-smoke:
-	cargo test -p backend-e2e --features e2e-tests --test cucumber_smoke
+	BACKEND_BASE_URL=http://127.0.0.1:3001 KEYCLOAK_URL=http://127.0.0.1:9026 CUSS_URL=http://127.0.0.1:8080 SMS_SINK_URL=http://127.0.0.1:3000 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/user-storage KEYCLOAK_CLIENT_ID=test-client KEYCLOAK_CLIENT_SECRET=some-secret SIGNATURE_SECRET=some-very-long-secret cargo test -p backend-e2e --features e2e-tests --test cucumber_smoke
 
 test-cucumber-full:
-	cargo test -p backend-e2e --features e2e-tests --test cucumber_full
+	BACKEND_BASE_URL=http://127.0.0.1:3002 KEYCLOAK_URL=http://127.0.0.1:9026 CUSS_URL=http://127.0.0.1:18080 SMS_SINK_URL=http://127.0.0.1:18081 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:15432/user-storage KEYCLOAK_CLIENT_ID=test-client KEYCLOAK_CLIENT_SECRET=some-secret SIGNATURE_SECRET=some-very-long-secret cargo test -p backend-e2e --features e2e-tests --test cucumber_full
 
 test-cucumber-all:
 	cargo test -p backend-e2e --features e2e-tests --test cucumber_smoke
@@ -157,6 +157,7 @@ test-e2e-smoke:
 	  DATABASE_URL=postgres://postgres:postgres@127.0.0.1:15432/user-storage \
 	  KEYCLOAK_CLIENT_ID=test-client \
 	  KEYCLOAK_CLIENT_SECRET=some-secret \
+	  SIGNATURE_SECRET=some-very-long-secret \
 	  cargo test -p backend-e2e --features e2e-tests --test smoke -- --nocapture'
 
 test-e2e-full:
@@ -193,6 +194,7 @@ test-e2e-full:
 	  export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:15432/user-storage; \
 	  export KEYCLOAK_CLIENT_ID=test-client; \
 	  export KEYCLOAK_CLIENT_SECRET=some-secret; \
+	  export SIGNATURE_SECRET=some-very-long-secret; \
 	  cargo test -p backend-e2e --features e2e-tests --test flow_sdk -- --nocapture; \
 	  cargo test -p backend-e2e --features e2e-tests --test cucumber_full'
 

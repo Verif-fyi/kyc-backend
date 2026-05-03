@@ -57,6 +57,8 @@ backend-migrate = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true, features = ["cookie"] }
 axum-server = { workspace = true }
+rustls-pemfile = { workspace = true }
+rustls = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 diesel-async = { workspace = true }
