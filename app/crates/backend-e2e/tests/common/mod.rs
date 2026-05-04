@@ -71,7 +71,6 @@ impl BffTestFixture {
     }
 }
 
-#[derive(Clone, Debug)]
 pub struct Env {
     pub user_storage_url: String,
     pub user_storage_blank_base_url: Option<String>,
@@ -586,7 +585,7 @@ pub async fn create_foreign_deposit_fixture(
         .context("failed to upsert foreign user fixture")?;
 
     let deposit_id = format!("smi_e2e_foreign_{}", chrono::Utc::now().timestamp_millis());
-    let idempotency_key = format!(
+    let _idempotency_key = format!(
         "KYC_FIRST_DEPOSIT:{foreign_user_id}:{}",
         chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
     );
