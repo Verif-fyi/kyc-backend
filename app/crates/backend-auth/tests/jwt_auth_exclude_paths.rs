@@ -1,7 +1,6 @@
 use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderValue, Request, StatusCode};
-use axum::routing::get;
 use axum::{body::to_bytes, response::Response};
 use backend_auth::{
     SignatureState, signature_layer,
