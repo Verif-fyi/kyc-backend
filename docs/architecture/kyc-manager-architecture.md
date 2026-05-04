@@ -6,7 +6,7 @@ The KYC Manager Admin App is an internal tool designed for staff to oversee, mon
 
 ## Actual
 
-The app is a data-intensive Single Page Application (SPA) built using **React Admin** templates. In the new architecture, it interacts with the **KYC Proxy Backend**, which acts as a secure gateway, authenticating the staff user via `HttpOnly` cookies and forwarding authorized requests to the core `keybound-backend` using internal HMAC signatures.
+The app is a data-intensive Single Page Application (SPA) built using **React Admin** templates. In the new architecture, it interacts with the **KYC Proxy Backend**, which acts as a secure gateway, authenticating the staff user via `HttpOnly` cookies and forwarding authorized requests to the core `verif-fyi-backend` using internal HMAC signatures.
 
 ## Constraints
 
@@ -67,7 +67,7 @@ sequenceDiagram
     participant Staff
     participant AdminApp as Admin App (React Admin)
     participant Proxy as KYC Proxy Backend
-    participant Core as Core Engine (keybound-backend)
+    participant Core as Core Engine (verif-fyi-backend)
 
     Staff->>AdminApp: Selects Step for Intervention
     AdminApp->>Proxy: GET /proxy/staff/flow/steps/{step_id} (Cookie Auth)
@@ -131,5 +131,5 @@ kyc-manager/
 ## Deployment Considerations
 
 - **Security**: Strict CSP (Content Security Policy) to prevent XSS. No tokens in local storage.
-- **Network Isolation**: The `keybound-backend` should only be accessible on an internal virtual network by the KYC Proxy Backend.
+- **Network Isolation**: The `verif-fyi-backend` should only be accessible on an internal virtual network by the KYC Proxy Backend.
 - **Containerization**: Standard Docker/Nginx setup for hosting the SPA.

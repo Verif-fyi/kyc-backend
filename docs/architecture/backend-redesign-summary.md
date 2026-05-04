@@ -2,14 +2,14 @@
 
 ## Strategic Shift: Pure KYC Engine & Proxy Backend
 
-The keybound-backend architecture is being fundamentally redesigned to improve security, simplify integration, and isolate responsibilities. Instead of the backend handling complex keypair device binding and acting as an OAuth2 Resource Server for external JWTs, we are splitting the architecture into two distinct layers:
+The verif-fyi-backend architecture is being fundamentally redesigned to improve security, simplify integration, and isolate responsibilities. Instead of the backend handling complex keypair device binding and acting as an OAuth2 Resource Server for external JWTs, we are splitting the architecture into two distinct layers:
 
-1. **KYC Core Engine (keybound-backend)**: A pure, stateless KYC state machine.
+1. **KYC Core Engine (verif-fyi-backend)**: A pure, stateless KYC state machine.
 2. **KYC Proxy Backend**: An intermediary gateway that handles all authentication, session management, and secure URL generation.
 
-### 1. The KYC Core Engine (keybound-backend)
+### 1. The KYC Core Engine (Verif-fyi-backend)
 
-The `keybound-backend` will be stripped of all public key cryptography and user-facing authentication mechanisms.
+The `verif-fyi-backend` will be stripped of all public key cryptography and user-facing authentication mechanisms.
 
 - **No Keypairs**: The concepts of `device-id`, `pubkey-id`, and Keycloak keypair bindings are completely removed.
 - **Pure State Machine**: The backend solely focuses on executing KYC flows, step transitions, and data persistence.
@@ -66,4 +66,4 @@ To provide a seamless but highly secure redirect from a Use Case Server (or exte
 
 ## Conclusion
 
-This redesign significantly reduces the attack surface and complexity of the `keybound-backend`. By extracting user-facing authentication into a dedicated Proxy Backend and enforcing server-to-server HMAC authentication on the core engine, the system becomes a robust, highly secure, pure KYC state machine.
+This redesign significantly reduces the attack surface and complexity of the `verif-fyi-backend`. By extracting user-facing authentication into a dedicated Proxy Backend and enforcing server-to-server HMAC authentication on the core engine, the system becomes a robust, highly secure, pure KYC state machine.

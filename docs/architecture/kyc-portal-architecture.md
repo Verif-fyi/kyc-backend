@@ -6,7 +6,7 @@ The KYC Hosted Page Portal provides a user-facing, high-conversion experience fo
 
 ## Actual
 
-The portal is a decoupled Single Page Application (SPA) built with **Rust Yew (WASM)**. Under the new architecture, it communicates exclusively with the **KYC Proxy Backend**. The Proxy handles the secure exchange of One-Time Codes (OTCs) for `HttpOnly` session cookies, completely hiding the underlying HMAC-authenticated Core Engine (`keybound-backend`) from the public internet.
+The portal is a decoupled Single Page Application (SPA) built with **Rust Yew (WASM)**. Under the new architecture, it communicates exclusively with the **KYC Proxy Backend**. The Proxy handles the secure exchange of One-Time Codes (OTCs) for `HttpOnly` session cookies, completely hiding the underlying HMAC-authenticated Core Engine (`verif-fyi-backend`) from the public internet.
 
 ## Constraints
 
@@ -67,7 +67,7 @@ sequenceDiagram
     participant User as End User Browser
     participant Portal as Yew Portal
     participant Proxy as KYC Proxy Backend
-    participant Core as Core Engine (keybound-backend)
+    participant Core as Core Engine (verif-fyi-backend)
 
     Note over UC, Core: Phase 1: Session & OTC Generation
     UC->>Proxy: POST /proxy/init-session (HMAC)
