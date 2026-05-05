@@ -24,9 +24,6 @@ flow-device-enroll = ["flow-sdk"]
 flow-account-update = ["flow-sdk"]
 flow-admin-user-management = ["flow-sdk"]
 
-auth-token-exchange = []
-auth-jwks = []
-
 flow-cuss-integration = ["flow-first-deposit"]
 
 # Legacy aliases kept for backward compatibility.
@@ -53,13 +50,14 @@ all-flows = [
 backend-auth = { workspace = true }
 backend-core = { workspace = true, features = ["axum"] }
 backend-flow-sdk = { workspace = true, optional = true }
-backend-id = { workspace = true }
 backend-repository = { workspace = true }
 backend-model = { workspace = true }
 backend-migrate = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true, features = ["cookie"] }
 axum-server = { workspace = true }
+rustls-pemfile = { workspace = true }
+rustls = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 diesel-async = { workspace = true }
@@ -83,7 +81,6 @@ utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
 base64 = { workspace = true }
 hex = { workspace = true }
-jsonwebtoken = { workspace = true }
 redis = { workspace = true }
 apalis = { workspace = true }
 apalis-redis = { workspace = true }
@@ -100,7 +97,6 @@ metrics-exporter-prometheus = { workspace = true }
 cuid = { workspace = true }
 getrandom = { workspace = true }
 
-gen_oas_server_kc = { workspace = true }
 gen_oas_client_cuss = { workspace = true }
 
 openssl = { workspace = true }

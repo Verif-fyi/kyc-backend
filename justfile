@@ -28,7 +28,7 @@ init: # Initialize docker compose services
 	docker compose -p {{project}} -f {{compose_file}} build {{c}}
 
 help: # Show this help message
-	@printf 'Commands:\n  init            Initialize docker compose services\n  help            Show this help message\n  pull            Pull latest images from registries\n  build           Build all configured compose services\n  up              Start services with rebuild\n  up-single       Start a single service (pass service=...)\n  up-sms          Start SMS gateway service\n  up-no-build     Start services without rebuilding\n  img             Show stored service images\n  start           Resume stopped services\n  down            Stop and remove containers\n  destroy         Snapshot removal of containers + volumes\n  stop            Stop running containers\n  restart         Restart services (stop + up)\n  logs            Follow all service logs\n  logs-keycloak   Follow Keycloak logs\n  logs-sms        Follow SMS gateway logs\n  ps              List active containers\n  ps-all          List all containers (including exited)\n  stats           Show container stats\n  dev             Run backend (dev)\n  dev-sms         Run SMS gateway (dev)\n  prepare         Build backend (release)\n  test-it         Run OAS integration tests\n  test-e2e-rust   Run Rust-native crate-level e2e tests (wiremock/testcontainers)\n  test-e2e-smoke  Run Compose smoke e2e suite with Rust runner\n  test-e2e-full   Run Compose full e2e suite with Rust runner\n  test-sms-comm   Test SMS gateway communication (requires running compose)\n'
+	@printf 'Commands:\n  init            Initialize docker compose services\n  help            Show this help message\n  pull            Pull latest images from registries\n  build           Build all configured compose services\n  up              Start services with rebuild\n  up-single       Start a single service (pass service=...)\n  up-sms          Start SMS gateway service\n  up-no-build     Start services without rebuilding\n  img             Show stored service images\n  start           Resume stopped services\n  down            Stop and remove containers\n  destroy         Snapshot removal of containers + volumes\n  stop            Stop running containers\n  restart         Restart services (stop + up)\n  logs            Follow all service logs\n  logs-sms        Follow SMS gateway logs\n  ps              List active containers\n  ps-all          List all containers (including exited)\n  stats           Show container stats\n  dev             Run backend (dev)\n  dev-sms         Run SMS gateway (dev)\n  prepare         Build backend (release)\n  test-it         Run OAS integration tests\n  test-e2e-rust   Run Rust-native crate-level e2e tests (wiremock/testcontainers)\n  test-e2e-smoke  Run Compose smoke e2e suite with Rust runner\n  test-e2e-full   Run Compose full e2e suite with Rust runner\n  test-sms-comm   Test SMS gateway communication (requires running compose)\n'
 
 pull: # Pull latest images from registries
 	docker compose -p {{project}} -f {{compose_file}} pull {{c}}
@@ -48,8 +48,8 @@ up-sms: # Start SMS gateway service
 generate: # Generate code from OpenAPI specs
 	rm -rf app/gen
 	docker compose -p {{project}} -f {{compose_file}} run --rm generate-code
-	cargo fmt -p gen_oas_client_cuss -p gen_oas_server_kc
-	cargo fix --allow-dirty -p gen_oas_client_cuss -p gen_oas_server_kc
+	cargo fmt -p gen_oas_client_cuss
+	cargo fix --allow-dirty -p gen_oas_client_cuss
 
 up-no-build: # Start services without rebuilding
 	docker compose -p {{project}} -f {{compose_file}} up -d --remove-orphans {{c}}
@@ -85,9 +85,6 @@ restart: # Restart services (stop + up)
 logs: # Follow all service logs
 	docker compose -p {{project}} -f {{compose_file}} logs --tail=100 -f {{c}}
 
-logs-keycloak: # Follow Keycloak logs
-	docker compose -p {{project}} -f {{compose_file}} logs --tail=100 -f keycloak-26 {{c}}
-
 logs-sms: # Follow SMS gateway logs
 	docker compose -p {{project}} -f {{compose_file}} logs --tail=100 -f sms-gateway {{c}}
 
@@ -116,10 +113,10 @@ test-e2e-rust:
 	cargo test -p backend-auth --features e2e-tests --test oidc_wiremock_e2e
 
 test-cucumber-smoke:
-	cargo test -p backend-e2e --features e2e-tests --test cucumber_smoke
+	BACKEND_BASE_URL=http://127.0.0.1:3001 KEYCLOAK_URL=http://127.0.0.1:9026 CUSS_URL=http://127.0.0.1:8080 SMS_SINK_URL=http://127.0.0.1:3000 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/user-storage KEYCLOAK_CLIENT_ID=test-client KEYCLOAK_CLIENT_SECRET=some-secret SIGNATURE_SECRET=some-very-long-secret cargo test -p backend-e2e --features e2e-tests --test cucumber_smoke
 
 test-cucumber-full:
-	cargo test -p backend-e2e --features e2e-tests --test cucumber_full
+	BACKEND_BASE_URL=http://127.0.0.1:3002 KEYCLOAK_URL=http://127.0.0.1:9026 CUSS_URL=http://127.0.0.1:18080 SMS_SINK_URL=http://127.0.0.1:18081 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:15432/user-storage KEYCLOAK_CLIENT_ID=test-client KEYCLOAK_CLIENT_SECRET=some-secret SIGNATURE_SECRET=some-very-long-secret cargo test -p backend-e2e --features e2e-tests --test cucumber_full
 
 test-cucumber-all:
 	cargo test -p backend-e2e --features e2e-tests --test cucumber_smoke
@@ -157,6 +154,7 @@ test-e2e-smoke:
 	  DATABASE_URL=postgres://postgres:postgres@127.0.0.1:15432/user-storage \
 	  KEYCLOAK_CLIENT_ID=test-client \
 	  KEYCLOAK_CLIENT_SECRET=some-secret \
+	  SIGNATURE_SECRET=some-very-long-secret \
 	  cargo test -p backend-e2e --features e2e-tests --test smoke -- --nocapture'
 
 test-e2e-full:
@@ -193,6 +191,7 @@ test-e2e-full:
 	  export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:15432/user-storage; \
 	  export KEYCLOAK_CLIENT_ID=test-client; \
 	  export KEYCLOAK_CLIENT_SECRET=some-secret; \
+	  export SIGNATURE_SECRET=some-very-long-secret; \
 	  cargo test -p backend-e2e --features e2e-tests --test flow_sdk -- --nocapture; \
 	  cargo test -p backend-e2e --features e2e-tests --test cucumber_full'
 

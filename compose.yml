@@ -1,6 +1,5 @@
 include:
   - deploy/compose/tools.compose.yml
-  - deploy/compose/keycloak.compose.yml
   - deploy/compose/postgres.compose.yml
   - deploy/compose/redis.compose.yml
   - deploy/compose/minio.compose.yml

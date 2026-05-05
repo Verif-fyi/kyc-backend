@@ -173,16 +173,6 @@ impl FlowStepPatch {
 }
 
 #[derive(Debug, Clone)]
-pub struct SigningKeyCreateInput {
-    pub kid: String,
-    pub private_key_pem: String,
-    pub public_key_jwk: Value,
-    pub algorithm: String,
-    pub expires_at: Option<DateTime<Utc>>,
-    pub is_active: bool,
-}
-
-#[derive(Debug, Clone)]
 pub struct UserDataUpsertInput {
     pub user_id: String,
     pub name: String,
@@ -276,17 +266,6 @@ pub trait FlowRepo: Send + Sync {
         patch: FlowStepPatch,
     ) -> RepoResult<backend_model::db::FlowStepRow>;
 
-    async fn deactivate_signing_keys(&self) -> RepoResult<usize>;
-
-    async fn create_signing_key(
-        &self,
-        input: SigningKeyCreateInput,
-    ) -> RepoResult<backend_model::db::SigningKeyRow>;
-
-    async fn get_active_signing_key(&self) -> RepoResult<Option<backend_model::db::SigningKeyRow>>;
-
-    async fn list_active_signing_keys(&self) -> RepoResult<Vec<backend_model::db::SigningKeyRow>>;
-
     async fn claim_next_system_step(&self) -> RepoResult<Option<backend_model::db::FlowStepRow>>;
 }
 
@@ -294,7 +273,7 @@ pub trait FlowRepo: Send + Sync {
 pub trait UserRepo: Send + Sync {
     async fn create_user(
         &self,
-        req: &backend_model::kc::UserUpsert,
+        req: &backend_model::user::UserUpsert,
     ) -> RepoResult<backend_model::db::UserRow>;
 
     async fn get_user(&self, user_id: &str) -> RepoResult<Option<backend_model::db::UserRow>>;
@@ -302,28 +281,28 @@ pub trait UserRepo: Send + Sync {
     async fn update_user(
         &self,
         user_id: &str,
-        req: &backend_model::kc::UserUpsert,
+        req: &backend_model::user::UserUpsert,
     ) -> RepoResult<Option<backend_model::db::UserRow>>;
 
     async fn delete_user(&self, user_id: &str) -> RepoResult<u64>;
 
     async fn search_users(
         &self,
-        req: &backend_model::kc::UserSearch,
+        req: &backend_model::user::UserSearch,
     ) -> RepoResult<Vec<backend_model::db::UserRow>>;
 
     async fn resolve_user_by_phone(
         &self,
-        realm: &str,
         phone: &str,
     ) -> RepoResult<Option<backend_model::db::UserRow>>;
 
-    async fn find_users_by_phone(&self, phone: &str)
-    -> RepoResult<Vec<backend_model::db::UserRow>>;
+    async fn find_users_by_phone(
+        &self,
+        phone: &str,
+    ) -> RepoResult<Vec<backend_model::db::UserRow>>;
 
     async fn resolve_or_create_user_by_phone(
         &self,
-        realm: &str,
         phone: &str,
     ) -> RepoResult<(backend_model::db::UserRow, bool)>;
 
@@ -348,43 +327,4 @@ pub trait UserRepo: Send + Sync {
         metadata_patch: Value,
         eager_patch: Option<Value>,
     ) -> RepoResult<()>;
-}
-
-#[backend_core::async_trait]
-pub trait DeviceRepo: Send + Sync {
-    async fn lookup_device(
-        &self,
-        req: &backend_model::kc::DeviceLookupRequest,
-    ) -> RepoResult<Option<backend_model::db::DeviceRow>>;
-
-    async fn list_user_devices(
-        &self,
-        user_id: &str,
-        include_revoked: bool,
-    ) -> RepoResult<Vec<backend_model::db::DeviceRow>>;
-
-    async fn get_user_device(
-        &self,
-        user_id: &str,
-        device_id: &str,
-    ) -> RepoResult<Option<backend_model::db::DeviceRow>>;
-
-    async fn update_device_status(
-        &self,
-        record_id: &str,
-        status: &str,
-    ) -> RepoResult<backend_model::db::DeviceRow>;
-
-    async fn find_device_binding(
-        &self,
-        device_id: &str,
-        jkt: &str,
-    ) -> RepoResult<Option<(String, String)>>;
-
-    async fn bind_device(
-        &self,
-        req: &backend_model::kc::EnrollmentBindRequest,
-    ) -> RepoResult<String>;
-
-    async fn count_user_devices(&self, user_id: &str) -> RepoResult<i64>;
 }

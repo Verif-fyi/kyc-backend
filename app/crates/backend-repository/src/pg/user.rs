@@ -1,6 +1,6 @@
 use crate::traits::*;
 use backend_core::async_trait;
-use backend_model::{db, kc as kc_map};
+use backend_model::{db, user as user_dto};
 use diesel::PgJsonbExpressionMethods;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
@@ -78,11 +78,11 @@ fn normalize_search_field(value: Option<&String>) -> Option<String> {
 #[async_trait]
 impl UserRepo for UserRepository {
     #[instrument(skip(self))]
-    async fn create_user(&self, req: &kc_map::UserUpsert) -> RepoResult<db::UserRow> {
+    async fn create_user(&self, req: &user_dto::UserUpsert) -> RepoResult<db::UserRow> {
         debug!("Creating user: {:?}", req.username);
         use backend_model::schema::app_user::dsl::*;
 
-        let user_id_val = backend_id::user_id()?;
+        let user_id_val = backend_core::id::user_id().map_err(|e| backend_core::Error::internal("ID_GEN", e))?;
         let mut conn = self.get_conn().await?;
 
         let attributes_json = req
@@ -92,7 +92,6 @@ impl UserRepo for UserRepository {
 
         let new_user = db::UserRow {
             user_id: user_id_val,
-            realm: req.realm.clone(),
             username: req.username.clone(),
             full_name: normalize_full_name(req.first_name.clone()),
             email: req.email.clone(),
@@ -133,7 +132,7 @@ impl UserRepo for UserRepository {
     async fn update_user(
         &self,
         user_id_val: &str,
-        req: &kc_map::UserUpsert,
+        req: &user_dto::UserUpsert,
     ) -> RepoResult<Option<db::UserRow>> {
         debug!("Updating user: {}", user_id_val);
         use backend_model::schema::app_user::dsl::*;
@@ -147,7 +146,6 @@ impl UserRepo for UserRepository {
 
         diesel::update(app_user.filter(user_id.eq(user_id_val)))
             .set((
-                realm.eq(req.realm.clone()),
                 username.eq(req.username.clone()),
                 full_name.eq(normalize_full_name(req.first_name.clone())),
                 email.eq(req.email.clone()),
@@ -177,17 +175,15 @@ impl UserRepo for UserRepository {
     }
 
     #[instrument(skip(self))]
-    async fn search_users(&self, req: &kc_map::UserSearch) -> RepoResult<Vec<db::UserRow>> {
+    async fn search_users(&self, req: &user_dto::UserSearch) -> RepoResult<Vec<db::UserRow>> {
         debug!(
-            "Searching users: realm={}, search={:?}",
-            req.realm, req.search
+            "Searching users: search={:?}",
+            req.search
         );
         use backend_model::schema::app_user::dsl::*;
 
         let mut conn = self.get_conn().await?;
         let mut query = app_user.into_boxed();
-
-        query = query.filter(realm.eq(req.realm.clone()));
 
         let exact = req.exact.unwrap_or(false);
         let search_filter = normalize_search_field(req.search.as_ref());
@@ -219,8 +215,8 @@ impl UserRepo for UserRepository {
             || !attribute_filters.is_empty();
 
         // Defensive guard for KC federation lookups:
-        // if the request contains only realm (no identity filters), do not return
-        // arbitrary users from that realm.
+        // if the request contains no identity filters, do not return
+        // arbitrary users.
         if !has_identity_filter {
             return Ok(vec![]);
         }
@@ -310,16 +306,14 @@ impl UserRepo for UserRepository {
     #[instrument(skip(self))]
     async fn resolve_user_by_phone(
         &self,
-        realm_val: &str,
         phone: &str,
     ) -> RepoResult<Option<db::UserRow>> {
-        debug!("Resolving user by phone: {} in realm: {}", phone, realm_val);
+        debug!("Resolving user by phone: {}", phone);
         use backend_model::schema::app_user::dsl::*;
 
         let mut conn = self.get_conn().await?;
 
         app_user
-            .filter(realm.eq(realm_val))
             .filter(username.eq(phone))
             .first::<db::UserRow>(&mut conn)
             .await
@@ -345,23 +339,21 @@ impl UserRepo for UserRepository {
     #[instrument(skip(self))]
     async fn resolve_or_create_user_by_phone(
         &self,
-        realm_val: &str,
         phone: &str,
     ) -> RepoResult<(db::UserRow, bool)> {
         debug!("Resolving or creating user by phone: {}", phone);
-        if let Some(user) = self.resolve_user_by_phone(realm_val, phone).await? {
+        if let Some(user) = self.resolve_user_by_phone(phone).await? {
             return Ok((user, false));
         }
 
         use backend_model::schema::app_user::dsl::*;
-        let user_id_val = backend_id::user_id()?;
+        let user_id_val = backend_core::id::user_id().map_err(|e| backend_core::Error::internal("ID_GEN", e))?;
         let mut conn = self.get_conn().await?;
 
         let attributes_json = serde_json::json!({ "phone_number": phone });
 
         let new_user = db::UserRow {
             user_id: user_id_val,
-            realm: realm_val.to_owned(),
             username: phone.to_owned(),
             email: None,
             email_verified: false,

@@ -8,7 +8,7 @@ servers:
   - url: "https://api.example.com"
 
 security:
-  - BearerAuth: [ ]
+  - KcSignature: [ ]
 
 tags:
   - name: staff-flow
@@ -166,10 +166,10 @@ paths:
 
 components:
   securitySchemes:
-    BearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
+    KcSignature:
+      type: apiKey
+      in: header
+      name: x-kc-signature
 
   parameters:
     SessionId:

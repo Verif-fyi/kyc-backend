@@ -9,7 +9,6 @@ x-env: &env
   RUST_LOG: debug
   SMS_SINK_URL: "http://sms-gateway:3000"
   CUSS_URL: "http://cuss-wiremock:8080"
-  KC_TOKEN_URL: "http://keycloak:9026/realms/e2e-testing/protocol/openid-connect/token"
   CUSS_CLIENT_ID: "cuss-client"
   CUSS_CLIENT_SECRET: "cuss-client-secret-12345"
 
@@ -93,6 +92,8 @@ services:
       - config/dev.yaml
     volumes:
       - ../../config:/app/config/
+    ports:
+      - "3000:3000"
     environment:
       <<: *env
     depends_on:
@@ -105,6 +106,8 @@ services:
 
   cuss-wiremock:
     image: wiremock/wiremock:3.13.1
+    ports:
+      - "8080:8080"
     command:
       - --disable-banner
       - --verbose

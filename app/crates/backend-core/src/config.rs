@@ -302,6 +302,8 @@ pub struct Config {
 pub struct Tls {
     pub cert_path: String,
     pub key_path: String,
+    #[serde(default, alias = "client-ca-path")]
+    pub client_ca_path: Option<String>,
 }
 
 /// Keycloak API surface authentication configuration.

@@ -1,18 +1,17 @@
 use anyhow::Result;
 use backend_migrate::connect_postgres_and_migrate;
-use backend_model::kc::{KcMap, UserSearch, UserUpsert};
+use backend_model::user::{UserAttributes, UserSearch, UserUpsert};
 use backend_model::schema::app_user;
 use backend_repository::{UserRepo, UserRepository};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 
-fn make_attributes(device_id: &str) -> KcMap {
-    KcMap::from([(String::from("device_id"), device_id.to_owned())])
+fn make_attributes(device_id: &str) -> UserAttributes {
+    UserAttributes::from([(String::from("device_id"), device_id.to_owned())])
 }
 
-fn make_search_request(realm: &str, attributes: Option<KcMap>) -> UserSearch {
+fn make_search_request(attributes: Option<UserAttributes>) -> UserSearch {
     UserSearch {
-        realm: realm.to_owned(),
         search: None,
         username: None,
         first_name: None,
@@ -47,7 +46,6 @@ async fn search_users_filters_by_attributes_and_rejects_realm_only_queries() -> 
 
     let user_a = repo
         .create_user(&UserUpsert {
-            realm: realm.clone(),
             username: format!("user-a-{now}"),
             first_name: Some("Alice".to_owned()),
             last_name: Some("A".to_owned()),
@@ -60,7 +58,6 @@ async fn search_users_filters_by_attributes_and_rejects_realm_only_queries() -> 
 
     let user_b = repo
         .create_user(&UserUpsert {
-            realm: realm.clone(),
             username: format!("user-b-{now}"),
             first_name: Some("Bob".to_owned()),
             last_name: Some("B".to_owned()),
@@ -73,7 +70,6 @@ async fn search_users_filters_by_attributes_and_rejects_realm_only_queries() -> 
 
     let by_device = repo
         .search_users(&make_search_request(
-            &realm,
             Some(make_attributes(&device_b)),
         ))
         .await?;
@@ -82,20 +78,19 @@ async fn search_users_filters_by_attributes_and_rejects_realm_only_queries() -> 
 
     let not_found = repo
         .search_users(&make_search_request(
-            &realm,
             Some(make_attributes("dvc_missing")),
         ))
         .await?;
     assert!(not_found.is_empty());
 
     let realm_only = repo
-        .search_users(&make_search_request(&realm, None))
+        .search_users(&make_search_request(None))
         .await?;
     assert!(realm_only.is_empty());
 
     {
         let mut conn = pool.get().await?;
-        diesel::delete(app_user::table.filter(app_user::realm.eq(&realm)))
+        diesel::delete(app_user::table.filter(app_user::username.like(format!("%-{now}"))))
             .execute(&mut conn)
             .await?;
     }

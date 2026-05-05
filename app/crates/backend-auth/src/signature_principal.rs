@@ -1,6 +1,6 @@
-//! Keycloak signature verification for KC API surface.
+//! HMAC signature verification for API surfaces.
 //!
-//! This module provides signature verification for requests coming from Keycloak.
+//! This module provides signature verification for requests.
 //! The signature is an HMAC-SHA256 over a canonical payload format.
 
 use axum::http::{HeaderMap, Method, Uri};
@@ -10,7 +10,7 @@ use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use tracing::instrument;
 
-/// State for verifying Keycloak request signatures.
+/// State for verifying request signatures.
 #[derive(Clone, Debug)]
 pub struct SignatureState {
     /// Shared secret for HMAC verification
@@ -31,18 +31,18 @@ impl SignatureState {
         body: &[u8],
     ) -> Result<()> {
         let signature = headers
-            .get("x-kc-signature")
+            .get("x-auth-signature")
             .and_then(|h| h.to_str().ok())
-            .ok_or_else(|| Error::unauthorized("Missing x-kc-signature"))?;
+            .ok_or_else(|| Error::unauthorized("Missing x-auth-signature"))?;
 
         let timestamp_str = headers
-            .get("x-kc-timestamp")
+            .get("x-auth-timestamp")
             .and_then(|h| h.to_str().ok())
-            .ok_or_else(|| Error::unauthorized("Missing x-kc-timestamp"))?;
+            .ok_or_else(|| Error::unauthorized("Missing x-auth-timestamp"))?;
 
         let timestamp: i64 = timestamp_str
             .parse()
-            .map_err(|_| Error::unauthorized("Invalid x-kc-timestamp"))?;
+            .map_err(|_| Error::unauthorized("Invalid x-auth-timestamp"))?;
 
         let now = chrono::Utc::now().timestamp();
         if (now - timestamp).abs() > self.max_clock_skew_seconds {
@@ -63,6 +63,8 @@ impl SignatureState {
             uri.path(),
             body_str
         );
+
+        tracing::info!("Canonical payload: {:?}", canonical_payload);
 
         let mut mac = Hmac::<Sha256>::new_from_slice(self.signature_secret.as_bytes())
             .map_err(|e| Error::Server(e.to_string()))?;

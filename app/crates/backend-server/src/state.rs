@@ -1,15 +1,14 @@
 use crate::flows::registry as flow_registry;
 use crate::object_storage::{ObjectStorage, S3ObjectStorage};
 use crate::worker::{NotificationQueue, RedisNotificationQueue};
-use backend_auth::{HttpClient, OidcState, SignatureState};
+use backend_auth::SignatureState;
 use backend_core::Config;
 use backend_repository::{
-    DeviceRepo, DeviceRepository, FlowRepo, FlowRepository, UserRepo, UserRepository,
+    FlowRepo, FlowRepository, UserRepo, UserRepository,
 };
 use diesel_async::AsyncPgConnection;
 use diesel_async::pooled_connection::deadpool::Pool;
 use std::sync::Arc;
-use std::time::Duration;
 use tracing::info;
 
 #[derive(Clone)]
@@ -17,11 +16,9 @@ pub struct AppState {
     pub flow: Arc<dyn FlowRepo>,
     pub flow_registry: Arc<backend_flow_sdk::FlowRegistry>,
     pub user: Arc<dyn UserRepo>,
-    pub device: Arc<dyn DeviceRepo>,
     pub notification_queue: Arc<dyn NotificationQueue>,
     pub object_storage: Arc<dyn ObjectStorage>,
     pub config: Config,
-    pub oidc_state: Arc<OidcState>,
     pub signature_state: Arc<SignatureState>,
     pub replay_guard: Arc<dyn crate::auth_signature::ReplayGuard>,
 }
@@ -32,10 +29,8 @@ impl std::fmt::Debug for AppState {
             .field("flow", &"<FlowRepository>")
             .field("flow_registry", &"<FlowRegistry>")
             .field("user", &"<UserRepository>")
-            .field("device", &"<DeviceRepository>")
             .field("object_storage", &"<ObjectStorage>")
             .field("config", &self.config)
-            .field("oidc_state", &"<OidcState>")
             .field("signature_state", &"<SignatureState>")
             .finish()
     }
@@ -115,18 +110,6 @@ impl AppState {
                 .map_err(|e| backend_core::Error::Server(e.to_string()))?,
         );
         let user: Arc<dyn UserRepo> = Arc::new(UserRepository::new(pool.clone()));
-        let device: Arc<dyn DeviceRepo> = Arc::new(DeviceRepository::new(pool.clone()));
-
-        let http_client = HttpClient::new_with_defaults()?;
-
-        let oidc_state = Arc::new(OidcState::new(
-            cfg.oauth2.issuer.clone(),
-            cfg.oauth2.jwks_uri.clone(),
-            None,
-            Duration::from_secs(3600),
-            Duration::from_secs(3600),
-            http_client,
-        ));
 
         let signature_state = Arc::new(SignatureState {
             signature_secret: cfg.kc.signature_secret.clone(),
@@ -144,11 +127,9 @@ impl AppState {
             flow,
             flow_registry,
             user,
-            device,
             notification_queue,
             object_storage,
             config: cfg.clone(),
-            oidc_state,
             signature_state,
             replay_guard,
         })

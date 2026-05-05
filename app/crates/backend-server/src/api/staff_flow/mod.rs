@@ -4,9 +4,7 @@ use super::bff_flow::{
     service as bff_service,
 };
 use axum::extract::{Path, Query, State};
-use axum::http::HeaderMap;
 use axum::{Json, Router, routing::get};
-use backend_auth::JwtToken;
 use backend_core::Error;
 use backend_flow_sdk::{StepContext, StepOutcome};
 use backend_repository::{FlowSessionFilter, FlowStepPatch};
@@ -139,16 +137,13 @@ fn default_limit() -> i32 {
     ),
     responses((status = 200, body = StaffSessionListResponse)),
     tag = "staff-flow",
-    security(("bearerAuth" = []))
+    security(("KcSignature" = []))
 )]
-#[instrument(skip(api, headers))]
+#[instrument(skip(api))]
 async fn list_staff_sessions(
     State(api): State<BackendApi>,
-    headers: HeaderMap,
     Query(query): Query<StaffSessionQuery>,
 ) -> Result<Json<StaffSessionListResponse>, Error> {
-    let _token = require_staff_token(&api, &headers).await?;
-
     let user_ids = resolve_user_ids_for_filters(
         &api,
         query.user_id.as_deref(),
@@ -199,16 +194,13 @@ async fn list_staff_sessions(
     params(("session_id" = String, Path)),
     responses((status = 200, body = StaffSessionDetailResponse)),
     tag = "staff-flow",
-    security(("bearerAuth" = []))
+    security(("KcSignature" = []))
 )]
-#[instrument(skip(api, headers))]
+#[instrument(skip(api))]
 async fn get_staff_session(
     State(api): State<BackendApi>,
     Path(session_id): Path<String>,
-    headers: HeaderMap,
 ) -> Result<Json<StaffSessionDetailResponse>, Error> {
-    let _token = require_staff_token(&api, &headers).await?;
-
     let session = api
         .state
         .flow
@@ -230,15 +222,13 @@ async fn get_staff_session(
     params(("flow_id" = String, Path)),
     responses((status = 200, body = FlowDetailResponse)),
     tag = "staff-flow",
-    security(("bearerAuth" = []))
+    security(("KcSignature" = []))
 )]
-#[instrument(skip(api, headers))]
+#[instrument(skip(api))]
 async fn get_staff_flow(
     State(api): State<BackendApi>,
     Path(flow_id): Path<String>,
-    headers: HeaderMap,
 ) -> Result<Json<FlowDetailResponse>, Error> {
-    let _token = require_staff_token(&api, &headers).await?;
     let flow = api
         .state
         .flow
@@ -264,16 +254,13 @@ async fn get_staff_flow(
     ),
     responses((status = 200, body = [StepResponse])),
     tag = "staff-flow",
-    security(("bearerAuth" = []))
+    security(("KcSignature" = []))
 )]
-#[instrument(skip(api, headers))]
+#[instrument(skip(api))]
 async fn list_admin_steps(
     State(api): State<BackendApi>,
-    headers: HeaderMap,
     Query(query): Query<AdminStepQuery>,
 ) -> Result<Json<Vec<StepResponse>>, Error> {
-    let _token = require_staff_token(&api, &headers).await?;
-
     let user_ids = resolve_user_ids_for_filters(
         &api,
         query.user_id.as_deref(),
@@ -341,15 +328,13 @@ async fn list_admin_steps(
     params(("step_id" = String, Path)),
     responses((status = 200, body = StepResponse)),
     tag = "staff-flow",
-    security(("bearerAuth" = []))
+    security(("KcSignature" = []))
 )]
-#[instrument(skip(api, headers))]
+#[instrument(skip(api))]
 async fn get_admin_step(
     State(api): State<BackendApi>,
     Path(step_id): Path<String>,
-    headers: HeaderMap,
 ) -> Result<Json<StepResponse>, Error> {
-    let _token = require_staff_token(&api, &headers).await?;
     let step = get_admin_step_row(&api, &step_id).await?;
     Ok(Json(step.into()))
 }
@@ -361,17 +346,14 @@ async fn get_admin_step(
     request_body = SubmitStepRequest,
     responses((status = 200, body = StepResponse)),
     tag = "staff-flow",
-    security(("bearerAuth" = []))
+    security(("KcSignature" = []))
 )]
-#[instrument(skip(api, headers))]
+#[instrument(skip(api, body))]
 async fn submit_admin_step(
     State(api): State<BackendApi>,
     Path(step_id): Path<String>,
-    headers: HeaderMap,
     Json(body): Json<SubmitStepRequest>,
 ) -> Result<Json<StepResponse>, Error> {
-    let _token = require_staff_token(&api, &headers).await?;
-
     let step = get_admin_step_row(&api, &step_id).await?;
     if !step.status.eq_ignore_ascii_case("WAITING") {
         return Err(Error::conflict(
@@ -554,29 +536,6 @@ async fn get_admin_step_row(
     }
 
     Ok(step)
-}
-
-async fn require_staff_token(api: &BackendApi, headers: &HeaderMap) -> Result<JwtToken, Error> {
-    if !api.state.config.staff.enabled {
-        return Ok(JwtToken::new(backend_auth::Claims {
-            sub: "usr_auth_disabled".to_owned(),
-            name: Some("auth-disabled".to_owned()),
-            iss: api.state.config.oauth2.issuer.clone(),
-            exp: usize::MAX,
-            preferred_username: Some("auth-disabled".to_owned()),
-        }));
-    }
-
-    let auth_header = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default();
-
-    if !auth_header.to_ascii_lowercase().starts_with("bearer ") {
-        return Err(Error::unauthorized("Missing bearer token"));
-    }
-
-    JwtToken::verify(&auth_header[7..], &api.oidc_state).await
 }
 
 async fn resolve_user_ids_for_filters(

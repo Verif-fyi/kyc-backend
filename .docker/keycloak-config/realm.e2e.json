@@ -1,8 +1,8 @@
 {
   "id": "e2e-testing",
   "realm": "e2e-testing",
-  "displayName": "Keybound E2E",
-  "displayNameHtml": "<b>Keybound</b> E2E",
+  "displayName": "Verif-fyi E2E",
+  "displayNameHtml": "<b>Verif-fyi</b> E2E",
   "registrationAllowed": false,
   "rememberMe": false,
   "sslRequired": "none",
@@ -42,7 +42,7 @@
   "clients": [
     {
       "clientId": "web-mobile",
-      "name": "Keybound Vite Web",
+      "name": "Verif-fyi Vite Web",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": true,
@@ -76,7 +76,7 @@
     },
     {
       "clientId": "resource-server",
-      "name": "Keybound Resource Server",
+      "name": "Verif-fyi Resource Server",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": false,

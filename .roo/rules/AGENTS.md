@@ -1,8 +1,7 @@
 # AGENTS.md
 
 ## Purpose
-Tokenization/user-storage backend with three HTTP surfaces:
-- KC: `/kc/*`
+Tokenization/user-storage backend with two HTTP surfaces:
 - BFF: `/bff/*`
 - Staff: `/staff/*`
 
@@ -20,17 +19,16 @@ Tokenization/user-storage backend with three HTTP surfaces:
 - Runtime is native `axum`, using `Router::nest` to mount each API surface under a configurable base path.
 - Layering is strict: `controller -> repository` (explicit service layer removed).
 - Controllers: `app/crates/backend-server/src/api/mod.rs` (and submodules)
-- API modules: `api/bff.rs`, `api/kc.rs`, `api/staff.rs`
+- API modules: `api/bff.rs`, `api/staff.rs`
 - Repository: `app/crates/backend-repository/src/pg/mod.rs` (and submodules)
   - State machines: `app/crates/backend-repository/src/pg/state_machine.rs`
 
 ## Crate Roles (under `app/crates/`)
-- `backend-core`: config + shared `Error`/`Result`
-- `backend-auth`: axum middleware layers for authentication and authorization.
+- `backend-core`: config + shared `Error`/`Result` + ID generation (`backend_core::id::*`)
+- `backend-auth`: axum middleware layers for authentication and authorization (HMAC only).
 - `backend-server`: router/controllers/state/retry worker
 - `backend-repository`: Diesel-async repository layer.
 - `backend-model`: Diesel models (`Queryable`, `Selectable`, `Insertable`, `Identifiable`) + `o2o` DTO mapping. Contains `schema.rs`.
-- `backend-id`: prefixed CUID ID generation
 - `backend-migrate`: migration runner and database factory (Postgres only)
 - `gen_oas_*`: generated OA3 models/interfaces (under `app/gen/`, never edit manually)
 
@@ -49,20 +47,15 @@ Tokenization/user-storage backend with three HTTP surfaces:
 12. Always sort JWK keys alphabetically before serializing to JSON for signature payloads to ensure deterministic string representations across different platforms (Frontend, Keycloak, Backend).
 
 ## IDs (Mandatory)
-Always use prefix + CUID from `backend-id`:
+Always use prefix + CUID from `backend_core::id::*`:
 - `usr_*` users
-- `dvc_*` devices
-- `apr_*` approvals
-- `sms_*` SMS hashes
+- `session_*` sessions
+- `flow_*` flow instances
+- `step_*` flow steps
+- `upload_*` uploads
+- `evidence_*` evidence
 
 Never use UUID for backend IDs.
-
-## Device Binding Safety
-- Device uniqueness is on both `device_id` and `jkt`.
-- Enforce at precheck and bind time.
-- Bind must re-check and handle unique-conflict races deterministically.
-- Device rows now use a `(device_id, public_jwk)` composite primary key and expose a deterministic `device_record_id` that wraps `device_id` + SHA‑256 of the sorted JWK. `lookup_device` must refresh `last_seen_at` on every match so usage tracking stays accurate.
-- The new `backend-repository/tests/device_repo.rs` integration test requires an available Postgres instance; set `DATABASE_URL` before running `cargo test -p backend-repository --test device_repo`, otherwise the test will skip with a notice.
 
 ## Auth
 - Auth logic is implemented as `axum` middleware layers in `backend-auth`.
@@ -72,7 +65,6 @@ Never use UUID for backend IDs.
 ### Testing Coverage (Mandatory)
 - Global error/exception mapping tests live in `app/crates/backend-core/tests/error_response.rs`.
 - JWT middleware tests (BFF + Staff bearer auth) live in `app/crates/backend-auth/tests/jwt_auth_exclude_paths.rs`.
-- KC signature middleware tests also live in `app/crates/backend-auth/tests/jwt_auth_exclude_paths.rs`.
 - **Unit Tests**: `backend-server` has comprehensive unit tests for `state`, `api::{bff, staff}`, and `worker` using `test_utils` mocks.
 
 #### Auth and Error Scenarios
@@ -80,18 +72,6 @@ Required scenarios to keep covered in tests:
 - `backend_core::Error` metadata mapping and `IntoResponse` payload/status behavior.
 - Bearer middleware bypass cases (`enabled = false`, blank base path, path outside protected base path).
 - Bearer middleware enforcement cases (missing token, non-bearer scheme, invalid token, valid token).
-- KC signature middleware enforcement cases:
-  - missing `x-kc-timestamp`
-  - missing `x-kc-signature`
-  - invalid/out-of-skew timestamp
-  - invalid signature
-  - request body larger than `max_body_bytes`
-  - valid signature with body preservation
-  - url encoded paths
-  - nested router paths
-  - method mismatch
-  - path mismatch
-  - body mismatch
 
 Suggested verification commands:
 - `cargo test -p backend-core --features axum --test error_response`

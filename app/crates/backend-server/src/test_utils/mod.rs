@@ -2,13 +2,13 @@ use crate::flows::registry as flow_registry;
 use crate::object_storage::{EncryptionMode, ObjectStorage, PresignedUpload};
 use crate::state::AppState;
 use crate::worker::NotificationQueue;
-use backend_auth::{OidcState, SignatureState};
+use backend_auth::SignatureState;
 use backend_core::NotificationJob;
 use backend_core::async_trait;
 use backend_core::{Config, Error};
 use backend_repository::{
-    DeviceRepo, FlowInstanceCreateInput, FlowRepo, FlowSessionCreateInput, FlowSessionFilter,
-    FlowStepCreateInput, FlowStepPatch, RepoResult, SigningKeyCreateInput, UserDataUpsertInput,
+    FlowInstanceCreateInput, FlowRepo, FlowSessionCreateInput, FlowSessionFilter,
+    FlowStepCreateInput, FlowStepPatch, RepoResult, UserDataUpsertInput,
     UserRepo,
 };
 use bytes::Bytes;
@@ -124,17 +124,6 @@ mock! {
             step_id: &str,
             patch: FlowStepPatch,
         ) -> RepoResult<backend_model::db::FlowStepRow>;
-        async fn deactivate_signing_keys(&self) -> RepoResult<usize>;
-        async fn create_signing_key(
-            &self,
-            input: SigningKeyCreateInput,
-        ) -> RepoResult<backend_model::db::SigningKeyRow>;
-        async fn get_active_signing_key(
-            &self,
-        ) -> RepoResult<Option<backend_model::db::SigningKeyRow>>;
-        async fn list_active_signing_keys(
-            &self,
-        ) -> RepoResult<Vec<backend_model::db::SigningKeyRow>>;
         async fn claim_next_system_step(
             &self,
         ) -> RepoResult<Option<backend_model::db::FlowStepRow>>;
@@ -147,7 +136,7 @@ mock! {
     impl UserRepo for UserRepo {
         async fn create_user(
             &self,
-            req: &backend_model::kc::UserUpsert,
+            req: &backend_model::user::UserUpsert,
         ) -> RepoResult<backend_model::db::UserRow>;
         async fn get_user(
             &self,
@@ -156,25 +145,25 @@ mock! {
         async fn update_user(
             &self,
             user_id: &str,
-            req: &backend_model::kc::UserUpsert,
+            req: &backend_model::user::UserUpsert,
         ) -> RepoResult<Option<backend_model::db::UserRow>>;
         async fn delete_user(&self, user_id: &str) -> RepoResult<u64>;
         async fn search_users(
             &self,
-            req: &backend_model::kc::UserSearch,
+            req: &backend_model::user::UserSearch,
         ) -> RepoResult<Vec<backend_model::db::UserRow>>;
         async fn resolve_user_by_phone(
             &self,
-            realm: &str,
             phone: &str,
         ) -> RepoResult<Option<backend_model::db::UserRow>>;
+
         async fn find_users_by_phone(
             &self,
             phone: &str,
         ) -> RepoResult<Vec<backend_model::db::UserRow>>;
+
         async fn resolve_or_create_user_by_phone(
             &self,
-            realm: &str,
             phone: &str,
         ) -> RepoResult<(backend_model::db::UserRow, bool)>;
         async fn upsert_user_data(
@@ -194,47 +183,10 @@ mock! {
     }
 }
 
-mock! {
-    pub DeviceRepo {}
-    #[async_trait]
-    impl DeviceRepo for DeviceRepo {
-        async fn lookup_device(
-            &self,
-            req: &backend_model::kc::DeviceLookupRequest,
-        ) -> RepoResult<Option<backend_model::db::DeviceRow>>;
-        async fn list_user_devices(
-            &self,
-            user_id: &str,
-            include_revoked: bool,
-        ) -> RepoResult<Vec<backend_model::db::DeviceRow>>;
-        async fn get_user_device(
-            &self,
-            user_id: &str,
-            device_id: &str,
-        ) -> RepoResult<Option<backend_model::db::DeviceRow>>;
-        async fn update_device_status(
-            &self,
-            record_id: &str,
-            status: &str,
-        ) -> RepoResult<backend_model::db::DeviceRow>;
-        async fn find_device_binding(
-            &self,
-            device_id: &str,
-            jkt: &str,
-        ) -> RepoResult<Option<(String, String)>>;
-        async fn bind_device(
-            &self,
-            req: &backend_model::kc::EnrollmentBindRequest,
-        ) -> RepoResult<String>;
-        async fn count_user_devices(&self, user_id: &str) -> RepoResult<i64>;
-    }
-}
-
 #[derive(Default)]
 pub struct TestAppStateBuilder {
     pub flow: Option<Arc<dyn FlowRepo>>,
     pub user: Option<Arc<dyn UserRepo>>,
-    pub device: Option<Arc<dyn DeviceRepo>>,
     pub notification_queue: Option<Arc<dyn NotificationQueue>>,
     pub object_storage: Option<Arc<dyn ObjectStorage>>,
     pub config: Option<Config>,
@@ -252,11 +204,6 @@ impl TestAppStateBuilder {
 
     pub fn with_user(mut self, user: Arc<dyn UserRepo>) -> Self {
         self.user = Some(user);
-        self
-    }
-
-    pub fn with_device(mut self, device: Arc<dyn DeviceRepo>) -> Self {
-        self.device = Some(device);
         self
     }
 
@@ -310,15 +257,6 @@ cuss:
             .unwrap()
         });
 
-        let oidc_state = Arc::new(OidcState::new(
-            config.oauth2.issuer.clone(),
-            config.oauth2.jwks_uri.clone(),
-            None,
-            Duration::from_secs(3600),
-            Duration::from_secs(3600),
-            backend_auth::HttpClient::new_with_defaults().unwrap(),
-        ));
-
         let signature_state = Arc::new(SignatureState {
             signature_secret: config.kc.signature_secret.clone(),
             max_clock_skew_seconds: config.kc.max_clock_skew_seconds,
@@ -331,9 +269,6 @@ cuss:
                 flow_registry::build_registry(flow_registry::RegistryImports::default()).unwrap(),
             ),
             user: self.user.unwrap_or_else(|| Arc::new(MockUserRepo::new())),
-            device: self
-                .device
-                .unwrap_or_else(|| Arc::new(MockDeviceRepo::new())),
             notification_queue: self
                 .notification_queue
                 .unwrap_or_else(|| Arc::new(MockNotificationQueue::new())),
@@ -341,20 +276,8 @@ cuss:
                 .object_storage
                 .unwrap_or_else(|| Arc::new(MockObjectStorage::new())),
             config,
-            oidc_state,
             signature_state,
             replay_guard: Arc::new(crate::auth_signature::InMemoryReplayGuard::new()),
         }
     }
-}
-
-pub fn create_fake_jwt(user_id: &str) -> backend_auth::JwtToken {
-    let claims = backend_auth::Claims {
-        sub: user_id.to_owned(),
-        name: None,
-        iss: "http://localhost/test".to_owned(),
-        exp: usize::MAX,
-        preferred_username: None,
-    };
-    backend_auth::JwtToken::new(claims)
 }

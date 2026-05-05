@@ -419,68 +419,6 @@ impl FlowRepo for FlowRepository {
             .map_err(Into::into)
     }
 
-    async fn deactivate_signing_keys(&self) -> RepoResult<usize> {
-        use backend_model::schema::signing_key;
-
-        let mut conn = self.get_conn().await?;
-        diesel::update(signing_key::table.filter(signing_key::is_active.eq(true)))
-            .set(signing_key::is_active.eq(false))
-            .execute(&mut conn)
-            .await
-            .map_err(Into::into)
-    }
-
-    async fn create_signing_key(
-        &self,
-        input: SigningKeyCreateInput,
-    ) -> RepoResult<db::SigningKeyRow> {
-        use backend_model::schema::signing_key;
-
-        let mut conn = self.get_conn().await?;
-        let row = db::SigningKeyRow {
-            kid: input.kid,
-            private_key_pem: input.private_key_pem,
-            public_key_jwk: input.public_key_jwk,
-            algorithm: input.algorithm,
-            created_at: Utc::now(),
-            expires_at: input.expires_at,
-            is_active: input.is_active,
-        };
-
-        diesel::insert_into(signing_key::table)
-            .values(&row)
-            .get_result::<db::SigningKeyRow>(&mut conn)
-            .await
-            .map_err(Into::into)
-    }
-
-    async fn get_active_signing_key(&self) -> RepoResult<Option<db::SigningKeyRow>> {
-        use backend_model::schema::signing_key;
-
-        let mut conn = self.get_conn().await?;
-        signing_key::table
-            .filter(signing_key::is_active.eq(true))
-            .order(signing_key::created_at.desc())
-            .select(db::SigningKeyRow::as_select())
-            .first::<db::SigningKeyRow>(&mut conn)
-            .await
-            .optional()
-            .map_err(Into::into)
-    }
-
-    async fn list_active_signing_keys(&self) -> RepoResult<Vec<db::SigningKeyRow>> {
-        use backend_model::schema::signing_key;
-
-        let mut conn = self.get_conn().await?;
-        signing_key::table
-            .filter(signing_key::is_active.eq(true))
-            .order(signing_key::created_at.desc())
-            .select(db::SigningKeyRow::as_select())
-            .load::<db::SigningKeyRow>(&mut conn)
-            .await
-            .map_err(Into::into)
-    }
-
     #[instrument(skip(self))]
     async fn claim_next_system_step(&self) -> RepoResult<Option<db::FlowStepRow>> {
         debug!("Claiming next system step");

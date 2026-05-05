@@ -140,7 +140,7 @@ async fn presign_upload(
         _ => crate::object_storage::EncryptionMode::S3,
     };
 
-    let upload_id = backend_id::kyc_upload_id()?;
+    let upload_id = backend_core::id::kyc_upload_id()?;
     let extension = extension_for_mime(&body.mime);
     let _size_bytes = body.size_bytes;
     let object_key = format!(
@@ -203,7 +203,7 @@ async fn complete_upload(
         .map_err(|_| Error::not_found("UPLOAD_NOT_FOUND", "Uploaded object not found"))?;
 
     Ok(Json(EvidenceRef {
-        evidence_id: backend_id::kyc_evidence_id()?,
+        evidence_id: backend_core::id::kyc_evidence_id()?,
         session_id: body.session_id,
         step_id: body.step_id,
         asset_type: asset_type_from_key(&body.object_key),

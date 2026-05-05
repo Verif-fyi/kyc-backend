@@ -27,7 +27,6 @@ pub struct AppDepositRecipientRow {
 #[diesel(table_name = crate::schema::app_user)]
 pub struct UserRow {
     pub user_id: String,
-    pub realm: String,
     pub username: String,
     pub full_name: Option<String>,
     pub email: Option<String>,
@@ -51,27 +50,6 @@ pub struct UserDataRow {
     pub eager_fetch: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-}
-
-/// Device binding data stored in device table.
-/// Composite primary key: (device_id, public_jwk)
-/// This ensures uniqueness per device per key.
-#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
-#[diesel(table_name = crate::schema::device)]
-pub struct DeviceRow {
-    pub device_id: String,
-    pub user_id: String,
-    /// JWK thumbprint (SHA-256 of sorted JWK)
-    pub jkt: String,
-    /// Full JWK JSON string
-    pub public_jwk: String,
-    /// Deterministic ID: device_id + SHA-256 of sorted JWK
-    pub device_record_id: String,
-    pub status: String,
-    pub label: Option<String>,
-    pub created_at: DateTime<Utc>,
-    /// Updated on every lookup for usage tracking
-    pub last_seen_at: Option<DateTime<Utc>>,
 }
 
 /// Top-level flow session row.
@@ -126,19 +104,6 @@ pub struct FlowStepRow {
     pub finished_at: Option<DateTime<Utc>>,
 }
 
-/// JWT signing key row.
-#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
-#[diesel(table_name = crate::schema::signing_key)]
-pub struct SigningKeyRow {
-    pub kid: String,
-    pub private_key_pem: String,
-    pub public_key_jwk: Value,
-    pub algorithm: String,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: Option<DateTime<Utc>>,
-    pub is_active: bool,
-}
-
 /// State machine instance - represents a single KYC flow execution.
 impl diesel::associations::HasTable for UserRow {
     type Table = crate::schema::app_user::table;
@@ -164,14 +129,6 @@ impl diesel::associations::HasTable for UserDataRow {
     }
 }
 
-impl diesel::associations::HasTable for DeviceRow {
-    type Table = crate::schema::device::table;
-
-    fn table() -> Self::Table {
-        crate::schema::device::table
-    }
-}
-
 impl diesel::associations::HasTable for FlowSessionRow {
     type Table = crate::schema::flow_session::table;
 
@@ -193,14 +150,6 @@ impl diesel::associations::HasTable for FlowStepRow {
 
     fn table() -> Self::Table {
         crate::schema::flow_step::table
-    }
-}
-
-impl diesel::associations::HasTable for SigningKeyRow {
-    type Table = crate::schema::signing_key::table;
-
-    fn table() -> Self::Table {
-        crate::schema::signing_key::table
     }
 }
 
@@ -232,14 +181,6 @@ impl<'a> diesel::Identifiable for &'a UserDataRow {
     }
 }
 
-impl<'a> diesel::Identifiable for &'a DeviceRow {
-    type Id = (&'a str, &'a str);
-
-    fn id(self) -> Self::Id {
-        (self.device_id.as_str(), self.public_jwk.as_str())
-    }
-}
-
 impl<'a> diesel::Identifiable for &'a FlowSessionRow {
     type Id = &'a str;
 
@@ -261,13 +202,5 @@ impl<'a> diesel::Identifiable for &'a FlowStepRow {
 
     fn id(self) -> Self::Id {
         self.id.as_str()
-    }
-}
-
-impl<'a> diesel::Identifiable for &'a SigningKeyRow {
-    type Id = &'a str;
-
-    fn id(self) -> Self::Id {
-        self.kid.as_str()
     }
 }

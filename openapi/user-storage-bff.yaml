@@ -13,6 +13,9 @@ tags:
   - name: flows
   - name: steps
 
+security:
+  - KcSignature: [ ]
+
 paths:
   /flow/users/{userId}:
     get:
@@ -516,3 +519,9 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FlowStep"
+
+  securitySchemes:
+    KcSignature:
+      type: apiKey
+      in: header
+      name: x-kc-signature

@@ -36,9 +36,9 @@ pub use models::*;
         FlowDetailResponse,
         StepResponse,
     )),
-    // Security requirement for all endpoints - empty scopes means no specific permissions needed
+    // Security requirement for all endpoints
     security(
-        ("bearerAuth" = [])
+        ("KcSignature" = [])
     ),
     tags(
         (name = "users", description = "User profile and completed KYC endpoints"),

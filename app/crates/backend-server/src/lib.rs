@@ -1,14 +1,12 @@
 //! Main backend server library for the tokenization backend.
 #![allow(clippy::result_large_err)]
 //!
-//! This crate provides the HTTP server, API surfaces (KC, BFF, Staff),
+//! This crate provides the HTTP server, API surfaces (BFF, Staff),
 //! state machine engine, background workers, and all application logic.
-//! It handles user storage, device binding, KYC flows, and integrations.
+//! It handles user storage, KYC flows, and integrations.
 
 pub(crate) mod api;
 pub(crate) mod auth_signature;
-pub(crate) mod bff_auth;
-pub(crate) mod correlation_id;
 pub(crate) mod flows;
 pub(crate) mod health;
 pub mod metrics;
@@ -24,42 +22,28 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::Request as HttpRequest;
 use axum::response::Response;
-use backend_auth::{jwks_auth_layer, kc_signature_layer};
+use axum_server::tls_rustls::RustlsConfig;
+use backend_auth::signature_layer;
 use backend_core::{Config, Result};
 use backend_migrate::connect_postgres_and_migrate;
 use hyper::StatusCode;
-use metrics_exporter_prometheus::PrometheusHandle;
+use rustls::server::WebPkiClientVerifier;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
-use tracing::info;
+use tracing::{info, error};
 
 /// Starts the HTTP server with all API surfaces and background workers.
-///
-/// This is the main entry point for running the application server.
-/// It initializes the database connection, application state, builds the router,
-/// and starts listening for requests.
-///
-/// # Arguments
-/// * `core_config` - Application configuration
-/// * `imports` - Flow definitions to import into the registry
-///
-/// # Returns
-/// `Result<()>` indicating successful server shutdown or error
-///
-/// # Errors
-/// Returns an error if initialization fails or the server cannot start
 pub async fn serve(core_config: &Config, imports: flow_registry::RegistryImports) -> Result<()> {
     let listen_addr = core_config.api_listen_addr()?;
-    let prometheus_handle = metrics::install_prometheus_recorder();
+    let _prometheus_handle = metrics::install_prometheus_recorder();
     let pool = connect_postgres_and_migrate(&core_config.database.url).await?;
     let state = Arc::new(state::AppState::from_config(core_config, pool, imports).await?);
 
     let api = api::BackendApi::new(
         state.clone(),
-        state.oidc_state.clone(),
         state.signature_state.clone(),
     );
-    let app = build_router(api, &state.config, state.oidc_state.clone(), prometheus_handle);
+    let app = build_router(api, &state.config);
 
     info!("Listening on {}", listen_addr);
 
@@ -73,8 +57,57 @@ pub async fn serve(core_config: &Config, imports: flow_registry::RegistryImports
 
     match core_config.api_tls_files() {
         Some((cert_path, key_path)) => {
-            let rustls_config =
-                axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path).await?;
+            let mut rustls_config =
+                RustlsConfig::from_pem_file(cert_path.clone(), key_path.clone()).await?;
+
+            if let Some(client_ca_path) = &core_config.server.tls.client_ca_path {
+                info!("Enabling mTLS with client CA: {}", client_ca_path);
+                let ca_file = std::fs::File::open(client_ca_path).map_err(|e| {
+                    error!("Failed to open client CA file: {}", e);
+                    backend_core::Error::Server(e.to_string())
+                })?;
+                let mut reader = std::io::BufReader::new(ca_file);
+                let certs = rustls_pemfile::certs(&mut reader)
+                    .map(|res| res.map_err(|e| e.into()))
+                    .collect::<std::result::Result<Vec<_>, backend_core::Error>>()?;
+
+                let mut root_store = rustls::RootCertStore::empty();
+                for cert in certs {
+                    root_store.add(cert).map_err(|e| {
+                        error!("Failed to add client CA cert: {}", e);
+                        backend_core::Error::Server(e.to_string())
+                    })?;
+                }
+
+                let verifier = WebPkiClientVerifier::builder(Arc::new(root_store))
+                    .build()
+                    .map_err(|e| {
+                        error!("Failed to build client cert verifier: {}", e);
+                        backend_core::Error::Server(e.to_string())
+                    })?;
+
+                // Load server cert and key again for manual config
+                let cert_file = std::fs::File::open(cert_path).map_err(|e| backend_core::Error::Server(e.to_string()))?;
+                let mut cert_reader = std::io::BufReader::new(cert_file);
+                let server_certs = rustls_pemfile::certs(&mut cert_reader)
+                    .map(|res| res.map_err(|e| e.into()))
+                    .collect::<std::result::Result<Vec<_>, backend_core::Error>>()?;
+
+                let key_file = std::fs::File::open(key_path).map_err(|e| backend_core::Error::Server(e.to_string()))?;
+                let mut key_reader = std::io::BufReader::new(key_file);
+                let key = rustls_pemfile::private_key(&mut key_reader)
+                    .map_err(|e| backend_core::Error::Server(e.to_string()))?
+                    .ok_or_else(|| backend_core::Error::Server("No private key found".to_string()))?;
+
+                let server_config = rustls::ServerConfig::builder()
+                    .with_client_cert_verifier(verifier)
+                    .with_single_cert(server_certs, key)
+                    .map_err(|e| {
+                        error!("Failed to create mTLS server config: {}", e);
+                        backend_core::Error::Server(e.to_string())
+                    })?;
+                rustls_config = RustlsConfig::from_config(Arc::new(server_config));
+            }
 
             axum_server::bind_rustls(listen_addr, rustls_config)
                 .handle(handle)
@@ -93,20 +126,6 @@ pub async fn serve(core_config: &Config, imports: flow_registry::RegistryImports
 }
 
 /// Runs the background worker for async tasks and state machine processing.
-///
-/// This function starts the worker that processes state machine steps and notifications.
-/// It acquires a distributed lock to ensure only one worker instance runs at a time.
-/// An optional health check server is started if in worker-only mode.
-///
-/// # Arguments
-/// * `core_config` - Application configuration
-/// * `imports` - Flow definitions to import into the registry
-///
-/// # Returns
-/// `Result<()>` indicating successful worker shutdown or error
-///
-/// # Errors
-/// Returns an error if Redis is unavailable or worker initialization fails
 pub async fn run_worker(
     core_config: &Config,
     imports: flow_registry::RegistryImports,
@@ -179,99 +198,42 @@ pub async fn run_worker(
 }
 
 /// Builds the main Axum router with all API surfaces and middleware.
-///
-/// Configures and mounts all API routers (KC, BFF, Staff) onto the main router.
-/// Applies authentication layers (KC signature verification and JWT validation)
-/// and request logging middleware based on configuration.
-///
-/// # Arguments
-/// * `api` - Backend API handler
-/// * `config` - Application configuration
-/// * `oidc_state` - OIDC authentication state
-///
-/// # Returns
-/// Configured `Router` ready to serve requests
 fn build_router(
     api: api::BackendApi,
     config: &Config,
-    oidc_state: Arc<backend_auth::OidcState>,
-    prometheus_handle: PrometheusHandle,
 ) -> Router {
-    // Mount sub-routers onto a fresh root router
-    let mut router = Router::new()
-        .merge(health::health_router())
-        .merge(metrics::metrics_router(prometheus_handle));
+    let mut router = Router::new();
 
-    // Mount KC router if base path is provided
-    let kc_base = config.kc.base_path.trim();
-    if !kc_base.is_empty() && kc_base != "/" {
-        let layer = kc_signature_layer(config.kc.enabled, api.signature_state.clone());
-        let kc_router = gen_oas_server_kc::server::new(api.clone()).layer(layer);
-        router = router.nest(kc_base, kc_router);
-    }
+    // Global signature layer for all API surfaces
+    let sig_layer = signature_layer(config.kc.enabled, api.signature_state.clone());
 
-    // Mount BFF router if base path is provided
+    // Mount BFF router
     let bff_base = config.bff.base_path.trim();
     if !bff_base.is_empty() && bff_base != "/" {
         let bff_router = Router::new()
             .merge(api::bff_flow::router(api.clone()))
-            .merge(api::bff_uploads::router(api.clone()))
-            .layer(axum::middleware::from_fn_with_state(
-                api.state.clone(),
-                bff_auth::require_bff_auth,
-            ));
+            .merge(api::bff_uploads::router(api.clone()));
         router = router.nest(bff_base, bff_router);
     }
 
-    // Mount Staff router if base path is provided
+    // Mount Staff router
     let staff_base = config.staff.base_path.trim();
     if !staff_base.is_empty() && staff_base != "/" {
         let staff_router = Router::new().nest("/flow", api::staff_flow::router(api.clone()));
         router = router.nest(staff_base, staff_router);
     }
 
-    // Mount Auth router if base path is provided
-    let auth_base = config.auth.base_path.trim();
-    if config.auth.enabled && !auth_base.is_empty() && auth_base != "/" {
-        let auth_router = api::auth::router(api.clone());
-        router = router.nest(auth_base, auth_router);
-    }
+    // Apply the signature layer to all routers (except health and swagger)
+    router = router.layer(sig_layer);
 
-    // Mount Swagger UI - pass full config so server URLs are dynamically configured
+    // Merge health router AFTER signature layer so it's public
+    router = router.merge(health::health_router());
+
+    // Mount Swagger UI
     router = router.merge(Into::<Router>::into(swagger::swagger_ui(&config)));
 
-    // 404 fallback for unmatched routes
+    // 404 fallback
     router = router.fallback(|| async { (StatusCode::NOT_FOUND, "Not Found") });
-
-    // Apply JWKS auth layer
-    let mut jwks_base_paths: Vec<String> = config
-        .oauth2
-        .base_paths
-        .iter()
-        .map(|p| p.trim().to_owned())
-        .filter(|p| !p.is_empty() && p != "/")
-        .collect();
-    if jwks_base_paths.is_empty() {
-        let mut defaults: Vec<&str> = Vec::new();
-        if config.staff.enabled {
-            defaults.push(&config.staff.base_path);
-        }
-        jwks_base_paths.extend(
-            defaults
-                .iter()
-                .map(|p| p.trim().to_owned())
-                .filter(|p| !p.is_empty() && p != "/"),
-        );
-    }
-    let bff_base_path = config.bff.base_path.trim().to_owned();
-    jwks_base_paths.retain(|path| path.trim() != bff_base_path);
-
-    router = router.layer(jwks_auth_layer(oidc_state, jwks_base_paths));
-
-    // Apply correlation ID middleware (outermost so it runs first and last)
-    router = router.layer(axum::middleware::from_fn(
-        correlation_id::correlation_id_middleware,
-    ));
 
     if config.logging.log_requests_enabled {
         router.layer(
@@ -281,7 +243,7 @@ fn build_router(
                         .extensions()
                         .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
                         .map(|ci| ci.0.to_string())
-                        .unwrap_or_else(|| "unknown".to_string());
+                        .unwrap_or_else(|| "unknown".to_owned());
                     let correlation_id = req
                         .headers()
                         .get("X-Correlation-ID")
@@ -307,7 +269,7 @@ fn build_router(
                             status = %res.status(),
                             latency = ?latency,
                             "sending response"
-                        )
+                        );
                     },
                 ),
         )
@@ -316,16 +278,6 @@ fn build_router(
     }
 }
 
-/// Extracts the request path for logging purposes.
-///
-/// Prefers the OriginalUri extension if available (for nested routers),
-/// otherwise falls back to the request's direct URI path.
-///
-/// # Arguments
-/// * `req` - HTTP request
-///
-/// # Returns
-/// String representation of the request path
 fn request_path(req: &HttpRequest<Body>) -> String {
     req.extensions()
         .get::<axum::extract::OriginalUri>()

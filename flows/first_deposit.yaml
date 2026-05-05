@@ -151,6 +151,11 @@ steps:
           source: flow
           source_path: /step_output/cuss_register_customer/savingsAccountId
           eager: true
+        - target_path: /kyc/first_deposit/transaction_id
+          source: flow
+          source_path: /step_output/cuss_approve_and_deposit/transactionId
+        - target_path: /kyc/first_deposit/status
+          value: APPROVED
         - target_path: /firstDeposit/transactionId
           source: flow
           source_path: /step_output/cuss_approve_and_deposit/transactionId

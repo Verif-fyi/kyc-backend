@@ -24,8 +24,6 @@ chrono.workspace = true
 hex.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tower.workspace = true
-jsonwebtoken.workspace = true
-jwks.workspace = true
 async-trait.workspace = true
 reqwest.workspace = true
 openssl.workspace = true
@@ -33,8 +31,3 @@ wiremock = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio.workspace = true
-
-[[test]]
-name = "oidc_wiremock_e2e"
-path = "tests/oidc_wiremock_e2e.rs"
-required-features = ["e2e-tests"]

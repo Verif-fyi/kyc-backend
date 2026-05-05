@@ -41,7 +41,6 @@ pub struct UploadUrlResult {
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct UserRecord {
     pub user_id: String,
-    pub realm: String,
     pub username: String,
     pub full_name: Option<String>,
     pub email: Option<String>,

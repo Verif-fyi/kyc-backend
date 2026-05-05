@@ -5,11 +5,9 @@
 //!
 //! Key tables:
 //! - app_user: User accounts and profile data
-//! - device: Device bindings with public keys
 //! - flow_session: Top-level container for KYC/account sessions
 //! - flow_instance: Flow executions within a session
 //! - flow_step: Step executions within a flow
-//! - signing_key: Backend RSA keys for token issuance
 
 diesel::table! {
     /// Static deposit recipients synced from configuration
@@ -28,7 +26,6 @@ diesel::table! {
     /// User accounts - primary key: user_id (CUID)
     app_user (user_id) {
         user_id -> Text,
-        realm -> Text,
         username -> Text,
         full_name -> Nullable<Text>,
         email -> Nullable<Text>,
@@ -51,21 +48,6 @@ diesel::table! {
         eager_fetch -> Bool,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    /// Device bindings - composite primary key: (device_id, public_jwk)
-    device (device_id, public_jwk) {
-        device_id -> Text,
-        user_id -> Text,
-        jkt -> Text,
-        public_jwk -> Text,
-        device_record_id -> Text,
-        status -> Text,
-        label -> Nullable<Text>,
-        created_at -> Timestamptz,
-        last_seen_at -> Nullable<Timestamptz>,
     }
 }
 
@@ -120,22 +102,8 @@ diesel::table! {
     }
 }
 
-diesel::table! {
-    /// JWT signing keys
-    signing_key (kid) {
-        kid -> Text,
-        private_key_pem -> Text,
-        public_key_jwk -> Jsonb,
-        algorithm -> Text,
-        created_at -> Timestamptz,
-        expires_at -> Nullable<Timestamptz>,
-        is_active -> Bool,
-    }
-}
-
 // Foreign key relationships
 diesel::joinable!(app_user_data -> app_user (user_id));
-diesel::joinable!(device -> app_user (user_id));
 diesel::joinable!(flow_instance -> flow_session (session_id));
 diesel::joinable!(flow_session -> app_user (user_id));
 diesel::joinable!(flow_step -> flow_instance (flow_id));
@@ -144,9 +112,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     app_deposit_recipients,
     app_user,
     app_user_data,
-    device,
     flow_instance,
     flow_session,
     flow_step,
-    signing_key,
 );

@@ -20,7 +20,7 @@ paths:
         Initiates the first stage of a new customer registration. It creates the client and a savings account in a pending state.
         This operation is idempotent based on the `externalId`. If a request with a previously used `externalId` is sent, the system will not create a new client and will respond appropriately.
       security:
-      - BearerAuth: []
+      - KcSignature: []
       requestBody:
         required: true
         content:
@@ -50,7 +50,7 @@ paths:
         Initiates the second stage of the registration process. It approves and activates the savings account created in Stage 1.
         An optional initial deposit can be made.
       security:
-      - BearerAuth: []
+      - KcSignature: []
       requestBody:
         required: true
         content:
@@ -72,10 +72,10 @@ paths:
           description: Forbidden - The caller does not have the required ROLE_KYC_MANAGER authority.
 components:
   securitySchemes:
-    BearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
+    KcSignature:
+      type: apiKey
+      in: header
+      name: x-kc-signature
   schemas:
     RegistrationRequest:
       type: object

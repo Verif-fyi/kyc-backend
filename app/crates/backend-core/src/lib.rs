@@ -13,6 +13,7 @@
 pub mod config;
 mod dto;
 mod error;
+pub mod id;
 pub mod notifications;
 
 #[cfg(feature = "cli")]

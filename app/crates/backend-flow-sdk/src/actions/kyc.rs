@@ -13,6 +13,25 @@ pub enum DocumentType {
     Selfie,
 }
 
+impl From<&str> for DocumentType {
+    fn from(s: &str) -> Self {
+        match s {
+            "id" => DocumentType::Id,
+            "address" => DocumentType::Address,
+            "selfie" => DocumentType::Selfie,
+            _ => DocumentType::Id,
+        }
+    }
+}
+
+impl std::str::FromStr for DocumentType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from(s))
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 #[allow(dead_code)]
 pub struct UploadDocumentConfig {
@@ -237,13 +256,23 @@ impl Step for ReviewDocumentAction {
 
         if approved {
             updates.user_metadata_patch = Some(json!({
-                "kyc_status": "VERIFIED",
-                format!("{}_verified_at", config.document_type.to_lowercase()): chrono::Utc::now().to_rfc3339()
+                "kyc": {
+                    "kyc_status": "VERIFIED",
+                    &config.document_type: {
+                        "status": "APPROVED",
+                        "verified_at": chrono::Utc::now().to_rfc3339()
+                    }
+                }
             }));
         } else {
             updates.user_metadata_patch = Some(json!({
-                "kyc_status": "REJECTED",
-                "rejection_reason": notes
+                "kyc": {
+                    "kyc_status": "REJECTED",
+                    &config.document_type: {
+                        "status": "REJECTED",
+                        "rejection_reason": notes
+                    }
+                }
             }));
         }
 
@@ -476,7 +505,8 @@ mod tests {
 
                 let updates = updates.unwrap();
                 let user_patch = updates.user_metadata_patch.unwrap();
-                assert_eq!(user_patch["kyc_status"], "VERIFIED");
+                // Check the nested structure: kyc.kyc_status
+                assert_eq!(user_patch["kyc"]["kyc_status"], "VERIFIED");
             }
             _ => panic!("Expected Done outcome"),
         }
@@ -503,7 +533,7 @@ mod tests {
 
                 let updates = updates.unwrap();
                 let user_patch = updates.user_metadata_patch.unwrap();
-                assert_eq!(user_patch["kyc_status"], "REJECTED");
+                assert_eq!(user_patch["kyc"]["kyc_status"], "REJECTED");
             }
             _ => panic!("Expected Done outcome"),
         }
