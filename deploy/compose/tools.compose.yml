@@ -2,7 +2,6 @@ services:
   download-core-tools:
     image: alpine/curl
     environment:
-      KEYCLOAK_PLUGIN_VERSION: "0.2.6"
       OPENAPI_GENERATOR_VERSION: "7.19.0"
     command:
       - /bin/sh
@@ -11,7 +10,6 @@ services:
         set -ex;
         rm -rf /data/*
         mkdir -p /data/bin
-        mkdir -p /data/kc-plugins
 
         download() {
           output="$$1"
@@ -28,18 +26,6 @@ services:
         echo "Download OpenAPI generator (we're using it to generate code from OpenAPI specs...";
         download /data/bin/openapi-generator-cli.jar "https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/$$OPENAPI_GENERATOR_VERSION/openapi-generator-cli-$$OPENAPI_GENERATOR_VERSION.jar"
 
-        echo "Download OpenAPI for Keycloak...";
-        download /data/keycloak-interface.openapi.yaml "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/backend.open-api.yml"
-        echo "Downloaded OpenAPI for Keycloak";
-
-        echo "Download keybound...";
-        download /data/kc-plugins/keycloak-keybound-all.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-all-$$KEYCLOAK_PLUGIN_VERSION-all.jar"
-        download /data/kc-plugins/keycloak-keybound-api-gateway-http.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-api-gateway-http-$$KEYCLOAK_PLUGIN_VERSION.jar"
-        download /data/kc-plugins/keycloak-keybound-custom-endpoint.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-custom-endpoint-$$KEYCLOAK_PLUGIN_VERSION.jar"
-        download /data/kc-plugins/keycloak-keybound-grant-device-key.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-grant-device-key-$$KEYCLOAK_PLUGIN_VERSION.jar"
-        download /data/kc-plugins/keycloak-keybound-user-storage-backend.jar "https://github.com/stephane-segning/keycloak-keybound/releases/download/v$$KEYCLOAK_PLUGIN_VERSION/keycloak-keybound-user-storage-backend-$$KEYCLOAK_PLUGIN_VERSION.jar"
-        echo "Downloaded keybound";
-
     volumes:
       - downloaded_data:/data
 
@@ -55,9 +41,6 @@ services:
     configs:
       - source: oas_client_cuss
         target: /tmp/oas_client_cuss.json
-      - source: oas_kc_openapi
-        target: /tmp/oas_kc_openapi.json
-        mode: 444
     volumes:
       - downloaded_data:/data
       - ../../app/gen:/work
@@ -91,25 +74,6 @@ services:
             rm -rf "$$TMP_DIR"
         done
 
-        # Generate OpenAPI JSON spec for KC (to include in Swagger UI)
-        echo "Generating KC OpenAPI JSON..."
-        TMP_DIR="/tmp/gen_oas_kc_openapi"
-        rm -rf "$$TMP_DIR"
-        mkdir -p "$$TMP_DIR"
-        java -jar "$$JAR_FILE" generate \
-          -c "/tmp/oas_kc_openapi.json" \
-          -o "$$TMP_DIR" \
-          --skip-validate-spec \
-          --global-property=apis=false,models=false,apiDocs=false,modelDocs=false
-
-        # Create directory for KC OpenAPI spec
-        mkdir -p /work/kc_openapi
-        # The openapi-generator puts the spec in the output root
-        cp "$$TMP_DIR"/*.json /work/kc_openapi/ 2>/dev/null || \
-          cp "$$TMP_DIR"/openapi.json /work/kc_openapi/ 2>/dev/null || \
-          find "$$TMP_DIR" -name "openapi*.json" -exec cp {} /work/kc_openapi/ \; || true
-        rm -rf "$$TMP_DIR"
-
         echo "Fixing permissions for $$USER_ID:$$GROUP_ID..."
         chown -R "$$USER_ID:$$GROUP_ID" /work
 
@@ -123,13 +87,5 @@ configs:
         "inputSpec": "/openapi/user-storage--cuss.yaml",
         "generatorName": "rust",
         "packageName": "gen_oas_client_cuss",
-        "packageVersion": "9.9.9"
-      }
-  oas_kc_openapi:
-    content: |
-      {
-        "inputSpec": "/openapi/keycloak-interface.openapi.yaml",
-        "generatorName": "openapi",
-        "packageName": "kc_openapi",
         "packageVersion": "9.9.9"
       }
